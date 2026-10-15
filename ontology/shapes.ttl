@@ -1,0 +1,47 @@
+@prefix sh:   <http://www.w3.org/ns/shacl#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix onto: <https://example.org/onto#> .
+
+onto:ContractShape a sh:NodeShape ;
+    sh:targetClass onto:Contract ;
+    sh:property [
+        sh:path onto:hasAmount ;
+        sh:datatype xsd:decimal ;
+        sh:minCount 1 ;
+        sh:maxCount 1 ;
+        sh:minInclusive "0"^^xsd:decimal
+    ] ;
+    sh:property [
+        sh:path onto:belongsToCustomer ;
+        sh:class onto:Customer ;
+        sh:minCount 1
+    ] ;
+    sh:property [
+        sh:path onto:hasStatus ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1
+    ] .
+
+onto:CustomerShape a sh:NodeShape ;
+    sh:targetClass onto:Customer ;
+    sh:property [
+        sh:path onto:hasName ;
+        sh:datatype xsd:string ;
+        sh:minCount 1 ;
+        sh:maxCount 1
+    ] .
+
+onto:WorkOrderShape a sh:NodeShape ;
+    sh:targetClass onto:WorkOrder ;
+    sh:property [
+        sh:path onto:belongsToDepartment ;
+        sh:class onto:Department ;
+        sh:minCount 1 ;
+        sh:maxCount 1
+    ] ;
+    sh:property [
+        sh:path onto:hasOwner ;
+        sh:class onto:Employee ;
+        sh:maxCount 1
+    ] .
