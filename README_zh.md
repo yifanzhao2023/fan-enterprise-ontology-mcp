@@ -12,7 +12,7 @@ Agent 读取本体 Schema、查询命名能力问题或裸 Cypher、写入经过
 
 - **协议：** MCP（stdio）
 - **语言：** Python（FastMCP）+ JVM 推理 CLI
-- **存储：** Neo4j + [neosemantics (n10s)](https://neo4j.com/labs/neosemantics/)
+- **存储：** Neo4j
 - **交换格式：** Turtle / JSON-LD（RDF）；工具返回使用 JSON-LD 对齐的 `@context`
 - **推理：** Jena rules（OWL 2 RL + 业务规则），离线执行
 - **校验：** pySHACL（写时 SHACL Core，离线全量 SHACL）
@@ -79,7 +79,7 @@ Agent 读取本体 Schema、查询命名能力问题或裸 Cypher、写入经过
 - 只要实体关系存储、不要公理与约束——属性图加一层轻 schema 更便宜。
 - 需要从源系统做本体对齐或知识抽取——不在 v1 范围（见[路线图](#15-路线图)）。
 - 需要请求时在线 OWL DL 推理——本方案推理是离线批处理。
-- 没有 JVM 且无法安装 Java——`onto-infer` 需要 JVM。
+- 没有 JVM 且无法安装 Java——推理链要跑 JVM。
 - 需要图形化本体建模——用 Protégé。本项目刻意不做建模。
 
 ---
@@ -88,7 +88,7 @@ Agent 读取本体 Schema、查询命名能力问题或裸 Cypher、写入经过
 
 ![架构 —— TBox 在 Git，ABox 在 Neo4j，推理离线](misc/diagrams/architecture.gif)
 
-**命名约定**：`onto-infer` 是用户跑的 Python CLI（导出 → 调 JVM → 校验 → 回写四步编排）；`rules-runner` 是 JVM 纯函数（`Turtle in → Turtle out`）。换推理引擎只换 `rules-runner`，`onto-infer` 不动。
+**命名约定**：`onto infer` 是用户跑的 Python CLI（导出 → 调 JVM → 校验 → 回写四步编排）；`rules-runner` 是 JVM 纯函数（`Turtle in → Turtle out`）。换推理引擎只换 `rules-runner`，`onto infer` 不动。
 
 **交付物**
 
@@ -96,7 +96,7 @@ Agent 读取本体 Schema、查询命名能力问题或裸 Cypher、写入经过
 | #   | 工件                                             | 职责                                                                 |
 | --- | ---------------------------------------------- | ------------------------------------------------------------------ |
 | 1   | MCP server（Python）                             | schema 供给、查询目录、裸 Cypher、受控写入、写时 SHACL Core                         |
-| 2   | `onto-infer`（Python CLI） + `rules-runner`（JVM） | 编排导出 → 调 JVM 推理 → 校验 → 回写。**JVM 侧不持 Neo4j 驱动、不持 DB 凭据、无写权限**，只读写文件 |
+| 2   | `onto infer`（Python CLI） + `rules-runner`（JVM） | 编排导出 → 调 JVM 推理 → 校验 → 回写。**JVM 侧不持 Neo4j 驱动、不持 DB 凭据、无写权限**，只读写文件 |
 | 3   | `ontology/`（Git）                               | TBox、shapes、rules、查询目录、schema 投影（生成物，CI 门禁）                        |
 | 4   | Skills + MCP prompts                           | Claude Code skill 包调用习惯；Codex 读 MCP prompts/resources              |
 
@@ -116,7 +116,7 @@ Agent 读取本体 Schema、查询命名能力问题或裸 Cypher、写入经过
 | Git `schema.projection.json`             | **查询侧扁平投影**——类、属性、关系、基数、Core 约束。**不含全部 OWL 公理，且永不进推理链路** | CI 跑 `onto project`；`git diff --exit-code` 门禁 |
 | Git `queries/*.cypher` + `manifest.json` | 查询目录 = 能力问题（CQ）集合                                        | 人 + CI 门禁                                     |
 | Neo4j ABox                               | 实例                                                       | MCP 受控 ingest（Agent 可写）                       |
-| Neo4j `:INFERRED` / `{inferred:true}`    | 派生类型与派生关系                                                | `onto-infer` 批作业                              |
+| Neo4j `:INFERRED` / `{inferred:true}`    | 派生类型与派生关系                                                | `onto infer` 批作业                              |
 | Neo4j `:ConstraintViolation`             | 离线 SHACL 违规，关联到违规实例                                      | 同一作业，清空重建                                     |
 
 
@@ -138,13 +138,13 @@ Agent 读取本体 Schema、查询命名能力问题或裸 Cypher、写入经过
 
 1. Agent 调 `upsert_entities` / `upsert_relations`，**结构化参数，不是 Cypher**。
 2. `validate_core` 只跑 SHACL Core 子集：`sh:minCount`、`sh:maxCount`、`sh:datatype`、`sh:class`。筛选 `sh:targetClass` 命中本次被写类型的 node shape，只在受影响子图上跑，同步执行。
-3. 表示写入器分配/复用 IRI（n10s URI 是实体唯一键）、把属性映射到 datatype 属性 vs. 对象属性、标签对齐 `rdf:type`。
+3. 表示写入器分配/复用 IRI（`uri` 属性是实体唯一键）、把属性映射到 datatype 属性 vs. 对象属性、标签对齐 `rdf:type`。
 4. 返回 `WriteReceipt`：写入 IRI、跳过项、校验摘要。
 
 两条硬约束：
 
 - **批原子性由 Neo4j 单事务保证**。整批提交或整批回滚——数据库层面，不靠应用层回滚。API 侧限制单批上限，超限直接拒并提示分批调用；分块写入会破坏批原子，故不提供。
-- **写入不更新 `:INFERRED`**。派生事实在下次 `onto-infer` 前保持陈旧（见[陈旧性语义](#陈旧性语义)）。
+- **写入不更新 `:INFERRED`**。派生事实在下次 `onto infer` 前保持陈旧（见[陈旧性语义](#陈旧性语义)）。
 
 SHACL-AF / SPARQL 约束**永不进写时路径**——太慢，且写时只回答「这条记录能不能进」。
 
@@ -170,7 +170,7 @@ SHACL-AF / SPARQL 约束**永不进写时路径**——太慢，且写时只回�
 | `BACKEND_UNAVAILABLE` | 稍后重试，不要重试风暴                               |
 
 
-### 链路 C —— 离线推理（`onto-infer`）
+### 链路 C —— 离线推理（`onto infer`）
 
 四步。**JVM 只做第二步。**
 
@@ -183,7 +183,7 @@ SHACL-AF / SPARQL 约束**永不进写时路径**——太慢，且写时只回�
 
 | 文件               | 内容                                                   | 产出方     |
 | ---------------- | ---------------------------------------------------- | ------- |
-| `abox.ttl`       | ABox 全量 RDF                                          | n10s 导出 |
+| `abox.ttl`       | ABox 全量 RDF                                          | `materialize_rdf`（rdflib） |
 | `inferred.ttl`   | **只含派生三元组，不含原始 ABox**                                | JVM     |
 | `violations.ttl` | SHACL 违规：focus node IRI / shape IRI / path / message | pySHACL |
 
@@ -192,15 +192,15 @@ SHACL-AF / SPARQL 约束**永不进写时路径**——太慢，且写时只回�
 
 ### JVM 不直写 Neo4j
 
-> `rules-runner` 的 JVM 进程**不持 Neo4j 驱动、不持 DB 凭据、无写权限**。它只读写文件。Python 编排层（`onto-infer`）独占所有写入。
+> `rules-runner` 的 JVM 进程**不持 Neo4j 驱动、不持 DB 凭据、无写权限**。它只读写文件。Python 编排层（`onto infer`）独占所有写入。
 
 实际收益：权限最小化（监管环境的安全评审更好过）、JVM 侧可脱离数据库单测、推理可复现（同输入必同输出）、换推理引擎只换第二步。
 
 ### 可复现性
 
-每次推理作业的输入都做指纹并记在单例元数据节点上：`TBox.ttl` / `rules/` / `shapes.ttl` 的 git commit SHA，`abox.ttl` / `inferred.ttl` / `violations.ttl` 的内容哈希，n10s 与 Neo4j 版本，以及各计数。
+每次推理作业的输入都做指纹并记在单例元数据节点上：`TBox.ttl` / `rules/` / `shapes.ttl` 的 git commit SHA，`abox.ttl` / `inferred.ttl` / `violations.ttl` / `shapes.ttl` 的内容哈希，Neo4j 版本，以及各计数。
 
-- `onto-infer` 从 git 检出读 TBox / rules / shapes
+- `onto infer` 从 git 检出读 TBox / rules / shapes
 - 工作树不干净则拒绝运行；`--allow-dirty` 可放行但会在元数据标注
 - 可复现性定义：**重放同一组三个输入文件，必得同一输出**
 
@@ -208,7 +208,7 @@ SHACL-AF / SPARQL 约束**永不进写时路径**——太慢，且写时只回�
 
 ### 陈旧性语义
 
-写入后到下次 `onto-infer` 之间，`:INFERRED` 是陈旧的。三处显式处理：
+写入后到下次 `onto infer` 之间，`:INFERRED` 是陈旧的。三处显式处理：
 
 - 查询结果**不隐藏**陈旧。Agent 自己判断答案是否依赖派生事实。
 - `replace_derived` 顺手写**单例元数据节点**（`job_id`、`finished_at`、输入计数、派生计数、违规计数），Agent 可查派生层有多新。一个节点——不是第四类语义节点。
@@ -216,7 +216,7 @@ SHACL-AF / SPARQL 约束**永不进写时路径**——太慢，且写时只回�
 
 ### 已知风险（进 spike，不阻塞）
 
-`materialize_rdf` 在大实例集导出时的内存占用。若 spike 显示撑不住，退路是 n10s 分页导出后拼接，或按标签分区导出多个文件喂 JVM。契约目前假定单文件 `abox.ttl`。
+`materialize_rdf` 在大实例集导出时的内存占用。若 spike 显示撑不住，导出是把整张图读进一个 rdflib 模型；退路是按标签分区导出多个文件喂 JVM。契约目前假定单文件 `abox.ttl`。
 
 ---
 
@@ -282,7 +282,7 @@ Jena rules 产出派生类型与派生关系，物化进 Neo4j 并打显式标�
 
 **`get_constraints` 只返回 Core 子集**（`minCount` / `maxCount` / `datatype` / `class`），供写入前预判。返回里带 `scope: "core"`。**通过写时校验只保证 Core 合规**——SHACL-AF / SPARQL 约束的违规要到下次离线全量校验才暴露，不在写入时。
 
-**`list_violations` 默认返回最近一次 `onto-infer` 作业的违规**，与元数据节点的 `job_id` 对齐。v1 图里只留最近一批（整体重建），所以该过滤当前等价于「全部」；可选 `job_id` 参数是给审计和作业对比用的。
+**`list_violations` 默认返回最近一次 `onto infer` 作业的违规**，与元数据节点的 `job_id` 对齐。v1 图里只留最近一批（整体重建），所以该过滤当前等价于「全部」；可选 `job_id` 参数是给审计和作业对比用的。
 
 ---
 
@@ -360,6 +360,11 @@ make projection
 
 `schema.projection.json` 由 `TBox.ttl` + `shapes.ttl` 编译而来。**要一起提交**——过期 CI 会红。
 
+> **`ontology/` 里放的是样例，不是你的本体。**
+> 当前是一个可跑通的样例域——**企业合同管理**——目的是让 server 开箱能跑、CI 有东西可回归。
+> 它刻意模拟了 6 个常见场景：**术语消歧、命名查询、多跳组织、合法写入、非法写入、安全边界**。
+> 真实使用时请整份替换成你自己的数据。怎么换见 [`ontology/README_zh.md`](ontology/README_zh.md)。
+
 ### 载入样例数据（可选）
 
 ```bash
@@ -367,7 +372,7 @@ make seed
 ```
 
 读 `ontology/abox.ttl`，走 MCP 写入工具同一套表示写入器写进 Neo4j。要把样例本体换成你自己的，
-看 [`ontology/README.md`](ontology/README.md)。
+看 [`ontology/README_zh.md`](ontology/README_zh.md)。
 
 ### 构建派生层
 
@@ -380,7 +385,7 @@ make infer
 它导出 ABox，在一个没有数据库访问权限的 JVM 里跑 `ontology/rules/*.rules`，
 用 SHACL 校验合并图，然后单事务整体替换派生层。用派生事实答题之前先看
 `get_inference_status()`——`stale: true` 表示上次跑完之后又有写入。
-需要它的场景见 [`ontology/README.md`](ontology/README.md) 第 13 节。
+需要它的场景见 [`ontology/README_zh.md`](ontology/README_zh.md) 第 13 节。
 
 ### 注册进 coding agent
 
@@ -489,7 +494,7 @@ agent 应该先 `search_schema` / `list_queries`，再 `run_query("contracts_ove
 ```
 
 **这是样例域。** `ontology/` 建的是企业合同管理，纯粹为了让栈开箱能跑——换成你自己的本体，
-见 [`ontology/README.md`](ontology/README.md)。
+见 [`ontology/README_zh.md`](ontology/README_zh.md)。
 
 ---
 
@@ -521,7 +526,7 @@ agent 应该先 `search_schema` / `list_queries`，再 `run_query("contracts_ove
 | JVM 不可用 / 超时 / 推理失败 | **不回写**；旧 `:INFERRED` 保留；作业元数据记失败        |
 | `abox.ttl` 导出失败     | 同上，不回写                                   |
 | 回写事务失败              | 单事务回滚，旧派生数据完好                            |
-| git 工作树脏            | `onto-infer` 拒跑；`--allow-dirty` 放行并标注元数据 |
+| git 工作树脏            | `onto infer` 拒跑；`--allow-dirty` 放行并标注元数据 |
 
 
 **「失败则不回写」是核心不变量。** 旧派生数据既好过没有派生数据，也好过半成品。任何一步失败，图保持在上次成功作业的状态。
@@ -536,15 +541,37 @@ agent 应该先 `search_schema` / `list_queries`，再 `run_query("contracts_ove
 
 ## 12. 开发
 
-> **占位 —— 尚未实现。**
+### 仓库布局
 
-计划内容：
+```
+src/feomcp/           MCP server 与离线推理链
+  ports.py            QueryEngine + FactStore 两个协议
+  neo4j_store.py      唯一适配器：驱动、guard 调用点、表示写入器
+  schema.py           读 schema.projection.json
+  catalog.py          命名查询（CQ 目录）
+  validate.py         写时 SHACL Core、离线全量 SHACL、TBox profile 闸
+  guard.py            Cypher 信任边界
+  server.py           工具面，唯一出口
+  cli.py              `onto project` / `onto seed` / `onto infer`
+jvm/                  rules-runner：Turtle 进、增量出。无数据库、无网络
+ontology/             样例域（换掉它——见 ontology/README_zh.md）
+  rules/*.rules       Jena 规则；带算术的业务条件写在这里
+tests/                unit / integration / e2e
+```
 
-- 仓库布局
-- 端口 / 适配器边界（`QueryEngine`、`FactStore`）
-- 如何在不改工具 schema 的前提下加存储后端（GraphDB）
-- 如何以「新工具」形式加能力模块（对齐、抽取）
-- 本地开发流程
+### 本地开发流程
+
+```bash
+python3.12 -m venv .venv && . .venv/bin/activate
+pip install -e ".[dev]"
+
+make rules-runner     # 构建 jvm/target/rules-runner.jar（要 JDK 17+ 和 Maven）
+make unit             # 无外部依赖
+make integration      # testcontainers，需要 Docker
+make demo             # up + seed + infer + e2e，跑在 docker-compose 上
+```
+
+`make integration` 和 `make demo` 要 Docker，`make unit` 不要——快速循环靠它。
 
 ### 模块边界（设计摘要）
 
@@ -562,8 +589,8 @@ agent 应该先 `search_schema` / `list_queries`，再 `run_query("contracts_ove
 | 层     | 范围                                                                                 | 依赖                           |
 | ----- | ---------------------------------------------------------------------------------- | ---------------------------- |
 | 单元    | `guard`（表驱动注入样本）、`schema` / `catalog` 解析、`validate` Core 判定、`cli` 对假 JVM 输出测 apply | 无                            |
-| 集成    | `neo4j_store`：upsert 原子性、表示写入器、`materialize_rdf` round-trip、`replace_derived` 重建   | testcontainers（Neo4j + n10s） |
-| 端到端   | `make demo`：灌样例 → `onto-infer` → 全部 CQ → 断言 `sample_result`                        | docker-compose               |
+| 集成    | `neo4j_store`：upsert 原子性、表示写入器、`materialize_rdf` round-trip、`replace_derived` 重建   | testcontainers（Neo4j） |
+| 端到端   | `make demo`：灌样例 → `onto infer` → 全部 CQ → 断言 `sample_result`                        | docker-compose               |
 | CQ 回归 | 每条 manifest 跑 `sample_params` 比对 `sample_result`                                   | 同上                           |
 
 
@@ -575,14 +602,14 @@ agent 应该先 `search_schema` / `list_queries`，再 `run_query("contracts_ove
 | `onto project` 后 `git diff --exit-code` | 投影与 Turtle 脱节    |
 | TBox profile 检查                         | 引入超出 RL 的 OWL 构造 |
 | SHACL 校验样例 ABox                         | 样例数据脏            |
-| `onto-infer` 跑通                         | 规则挂              |
+| `onto infer` 跑通                         | 规则挂              |
 | 全部 CQ 比对 `sample_result`                | 本体变更打断查询         |
 | manifest `uses` ⊆ 投影                    | 查询引用已删的类 / 属性    |
 | 单元 + 集成测试                               | 代码回归             |
 | `make demo` 全链路                         | 集成断裂             |
 
 
-**TBox profile 检查**：建模契约必须有机器检查。首选在 JVM 侧用权威的 `OWL2RLProfile` 检查（JVM 已在，成本是加一个依赖），超 profile 即拒跑 `onto-infer`。
+**TBox profile 检查**：建模契约必须有机器检查。首选在 JVM 侧用权威的 `OWL2RLProfile` 检查（JVM 已在，成本是加一个依赖），超 profile 即拒跑 `onto infer`。
 
 退路：Python 侧构造器黑名单 lint（禁 `owl:unionOf` / `owl:complementOf` / `owl:oneOf` / `owl:hasValue` 等）——几十行，但**不完整**。
 
@@ -598,7 +625,7 @@ agent 应该先 `search_schema` / `list_queries`，再 `run_query("contracts_ove
 - 批原子：批内一半非法 → 全不落
 - 超时 / 行上限触发
 - 投影缺失或不合法 → 拒启动
-- git 工作树脏 → `onto-infer` 拒跑
+- git 工作树脏 → `onto infer` 拒跑
 
 ### Spike 验收标准
 
@@ -607,9 +634,9 @@ spike 产出是**结论与参数**，不是代码。结论写进设计文档的�
 
 | spike           | 验收标准                                  |
 | --------------- | ------------------------------------- |
-| n10s round-trip | ABox 导出再导入，URI / 属性 / 标签逐字段零 diff     |
-| URI 唯一键         | 以 n10s URI 为实体唯一键；重复写入幂等；无重复实体        |
-| 版本兼容            | n10s 在 Neo4j 5.x 上导入导出稳定              |
+| ABox round-trip | `materialize_rdf` 把写进去的每个实体、类型、属性、关系原样吐出，零 diff |
+| URI 唯一键         | 以 `uri` 属性为实体唯一键；重复写入幂等；无重复实体      |
+| 版本兼容            | Neo4j 5.x 上读写会话与派生层重建稳定            |
 | 大实例集导出          | 10 万实例导出不 OOM；记录耗时与峰值内存；超阈值走分页 / 分区退路 |
 
 
@@ -641,7 +668,7 @@ spike 产出是**结论与参数**，不是代码。结论写进设计文档的�
 - TBox 限定 OWL 2 RL 子集。
 - 查询返回是 JSON-LD 对齐的 `@context`，不是严格 JSON-LD。RDF 交换只走文件链路。
 - 字段脱敏是全局配置，不做按 principal 差异化。三元组级 RBAC 不在 v1。
-- `onto-infer` 需要 JVM。
+- `onto infer` 需要 JVM。
 
 ---
 
