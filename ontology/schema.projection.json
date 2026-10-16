@@ -1,0 +1,343 @@
+{
+  "classes": [
+    {
+      "iri": "https://example.org/onto#BusinessDocument",
+      "labels": [
+        "Business document",
+        "业务文档"
+      ],
+      "name": "BusinessDocument",
+      "properties": [],
+      "relations_in": [],
+      "relations_out": [],
+      "superclasses": []
+    },
+    {
+      "iri": "https://example.org/onto#Contract",
+      "labels": [
+        "Contract",
+        "合同"
+      ],
+      "name": "Contract",
+      "properties": [
+        {
+          "iri": "https://example.org/onto#hasAmount",
+          "kind": "datatype",
+          "max": 1,
+          "min": 1,
+          "name": "hasAmount",
+          "range": "decimal"
+        },
+        {
+          "iri": "https://example.org/onto#hasStatus",
+          "kind": "datatype",
+          "max": 1,
+          "min": 1,
+          "name": "hasStatus",
+          "range": "string"
+        },
+        {
+          "iri": "https://example.org/onto#archived",
+          "kind": "datatype",
+          "max": null,
+          "min": null,
+          "name": "archived",
+          "range": "boolean"
+        }
+      ],
+      "relations_in": [],
+      "relations_out": [
+        {
+          "iri": "https://example.org/onto#belongsToCustomer",
+          "max": null,
+          "min": 1,
+          "name": "belongsToCustomer",
+          "target": "Customer"
+        }
+      ],
+      "superclasses": [
+        "BusinessDocument"
+      ]
+    },
+    {
+      "iri": "https://example.org/onto#Customer",
+      "labels": [
+        "Customer",
+        "客户"
+      ],
+      "name": "Customer",
+      "properties": [
+        {
+          "iri": "https://example.org/onto#hasName",
+          "kind": "datatype",
+          "max": 1,
+          "min": 1,
+          "name": "hasName",
+          "range": "string"
+        }
+      ],
+      "relations_in": [
+        {
+          "iri": "https://example.org/onto#belongsToCustomer",
+          "max": null,
+          "min": 1,
+          "name": "belongsToCustomer",
+          "source": "Contract"
+        }
+      ],
+      "relations_out": [],
+      "superclasses": []
+    },
+    {
+      "iri": "https://example.org/onto#Department",
+      "labels": [
+        "Department",
+        "部门"
+      ],
+      "name": "Department",
+      "properties": [],
+      "relations_in": [
+        {
+          "iri": "https://example.org/onto#belongsToDepartment",
+          "max": 1,
+          "min": 1,
+          "name": "belongsToDepartment",
+          "source": "WorkOrder"
+        },
+        {
+          "iri": "https://example.org/onto#worksFor",
+          "max": null,
+          "min": null,
+          "name": "worksFor",
+          "source": "Employee"
+        }
+      ],
+      "relations_out": [
+        {
+          "iri": "https://example.org/onto#hasHead",
+          "max": null,
+          "min": null,
+          "name": "hasHead",
+          "target": "Employee"
+        }
+      ],
+      "superclasses": []
+    },
+    {
+      "iri": "https://example.org/onto#Employee",
+      "labels": [
+        "Employee",
+        "员工"
+      ],
+      "name": "Employee",
+      "properties": [],
+      "relations_in": [
+        {
+          "iri": "https://example.org/onto#hasHead",
+          "max": null,
+          "min": null,
+          "name": "hasHead",
+          "source": "Department"
+        },
+        {
+          "iri": "https://example.org/onto#hasOwner",
+          "max": 1,
+          "min": null,
+          "name": "hasOwner",
+          "source": "WorkOrder"
+        }
+      ],
+      "relations_out": [
+        {
+          "iri": "https://example.org/onto#worksFor",
+          "max": null,
+          "min": null,
+          "name": "worksFor",
+          "target": "Department"
+        }
+      ],
+      "superclasses": []
+    },
+    {
+      "iri": "https://example.org/onto#WorkOrder",
+      "labels": [
+        "Work order",
+        "工单"
+      ],
+      "name": "WorkOrder",
+      "properties": [],
+      "relations_in": [],
+      "relations_out": [
+        {
+          "iri": "https://example.org/onto#belongsToDepartment",
+          "max": 1,
+          "min": 1,
+          "name": "belongsToDepartment",
+          "target": "Department"
+        },
+        {
+          "iri": "https://example.org/onto#hasOwner",
+          "max": 1,
+          "min": null,
+          "name": "hasOwner",
+          "target": "Employee"
+        }
+      ],
+      "superclasses": []
+    }
+  ],
+  "constraints": {
+    "Contract": [
+      {
+        "kind": "class",
+        "path": "belongsToCustomer",
+        "value": "https://example.org/onto#Customer"
+      },
+      {
+        "kind": "minCount",
+        "path": "belongsToCustomer",
+        "value": "1"
+      },
+      {
+        "kind": "datatype",
+        "path": "hasAmount",
+        "value": "http://www.w3.org/2001/XMLSchema#decimal"
+      },
+      {
+        "kind": "maxCount",
+        "path": "hasAmount",
+        "value": "1"
+      },
+      {
+        "kind": "minCount",
+        "path": "hasAmount",
+        "value": "1"
+      },
+      {
+        "kind": "datatype",
+        "path": "hasStatus",
+        "value": "http://www.w3.org/2001/XMLSchema#string"
+      },
+      {
+        "kind": "maxCount",
+        "path": "hasStatus",
+        "value": "1"
+      },
+      {
+        "kind": "minCount",
+        "path": "hasStatus",
+        "value": "1"
+      }
+    ],
+    "Customer": [
+      {
+        "kind": "datatype",
+        "path": "hasName",
+        "value": "http://www.w3.org/2001/XMLSchema#string"
+      },
+      {
+        "kind": "maxCount",
+        "path": "hasName",
+        "value": "1"
+      },
+      {
+        "kind": "minCount",
+        "path": "hasName",
+        "value": "1"
+      }
+    ],
+    "WorkOrder": [
+      {
+        "kind": "class",
+        "path": "belongsToDepartment",
+        "value": "https://example.org/onto#Department"
+      },
+      {
+        "kind": "maxCount",
+        "path": "belongsToDepartment",
+        "value": "1"
+      },
+      {
+        "kind": "minCount",
+        "path": "belongsToDepartment",
+        "value": "1"
+      },
+      {
+        "kind": "class",
+        "path": "hasOwner",
+        "value": "https://example.org/onto#Employee"
+      },
+      {
+        "kind": "maxCount",
+        "path": "hasOwner",
+        "value": "1"
+      }
+    ]
+  },
+  "properties": [
+    {
+      "domain": "Contract",
+      "iri": "https://example.org/onto#archived",
+      "kind": "datatype",
+      "name": "archived",
+      "range": "boolean"
+    },
+    {
+      "domain": "Contract",
+      "iri": "https://example.org/onto#belongsToCustomer",
+      "kind": "object",
+      "name": "belongsToCustomer",
+      "range": "Customer"
+    },
+    {
+      "domain": "WorkOrder",
+      "iri": "https://example.org/onto#belongsToDepartment",
+      "kind": "object",
+      "name": "belongsToDepartment",
+      "range": "Department"
+    },
+    {
+      "domain": "Contract",
+      "iri": "https://example.org/onto#hasAmount",
+      "kind": "datatype",
+      "name": "hasAmount",
+      "range": "decimal"
+    },
+    {
+      "domain": "Department",
+      "iri": "https://example.org/onto#hasHead",
+      "kind": "object",
+      "name": "hasHead",
+      "range": "Employee"
+    },
+    {
+      "domain": "Customer",
+      "iri": "https://example.org/onto#hasName",
+      "kind": "datatype",
+      "name": "hasName",
+      "range": "string"
+    },
+    {
+      "domain": "WorkOrder",
+      "iri": "https://example.org/onto#hasOwner",
+      "kind": "object",
+      "name": "hasOwner",
+      "range": "Employee"
+    },
+    {
+      "domain": "Contract",
+      "iri": "https://example.org/onto#hasStatus",
+      "kind": "datatype",
+      "name": "hasStatus",
+      "range": "string"
+    },
+    {
+      "domain": "Employee",
+      "iri": "https://example.org/onto#worksFor",
+      "kind": "object",
+      "name": "worksFor",
+      "range": "Department"
+    }
+  ],
+  "version": 1
+}

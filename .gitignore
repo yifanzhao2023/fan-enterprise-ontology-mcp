@@ -1,3 +1,7 @@
-conf/
 .claude
 .*/
+__pycache__/
+.pytest_cache/
+.venv/
+/basic-enterprise-ontology-mcp.iml
+/docs/

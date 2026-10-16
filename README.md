@@ -1,4 +1,4 @@
-# basic-enterprise-ontology-mcp
+# fan-enterprise-ontology-mcp
 
 **Making enterprise ontology simpler.** · 让企业本体更简单
 
@@ -100,6 +100,15 @@ This project does not build a modeling environment. It makes a human-authored on
 | 3   | `ontology/` (Git)                                | TBox, shapes, rules, query catalog, schema projection (generated, CI-gated)                                                                         |
 | 4   | Skills + MCP prompts                             | Claude Code skill wraps invocation habits; Codex reads MCP prompts/resources                                                                        |
 
+
+> **`ontology/` ships a worked example, not your ontology.** The files here model
+> one sample domain — enterprise contract management — so the server runs out of
+> the box and the CI suite has something to regress against. Replace `TBox.ttl`,
+> `shapes.ttl`, `queries/*.cypher` and `manifest.json` with your own; no Python
+> changes are needed. After editing the TBox, run `onto project` to regenerate
+> `schema.projection.json` (CI fails otherwise), and register every new query in
+> `manifest.json` — `Catalog.load` cross-checks each entry's `uses` against the
+> projection and refuses to start on a term that is not there.
 
 ### Data layout
 
@@ -308,63 +317,186 @@ ontology://schema     Full projection (large; human reference only, never into a
 | Claude Code skills | yes         | **no**                   | Invocation-habit wrapper only |
 
 
-**Knowledge must live in MCP resources** (at minimum `ontology://playbook`). Skills only wrap Claude Code habits. Otherwise Codex gets bare tools and nothing tells it "call `search_schema` first, then `list_queries`, and only then `query_raw`".
+**Knowledge lives in MCP resources and prompts** (at minimum `ontology://playbook`).
+A skill is a thin wrapper — it must not restate the playbook, or the two will drift.
+Otherwise Codex gets bare tools and nothing tells it "call `search_schema` first,
+then `list_queries`, and only then `query_raw`".
 
-Skills hold: the decision tree, CQ examples, error-retry patterns, and when to suspect stale derived facts.
+The skill (`skills/feomcp/SKILL.md`) carries the trigger conditions, the order of
+operations and the Claude Code habits that are not client-agnostic. Install it:
+
+```bash
+mkdir -p .claude/skills && cp -r skills/feomcp .claude/skills/   # this project
+cp -r skills/feomcp ~/.claude/skills/                            # every project
+```
 
 ---
 
 ## 8. Installation
 
-> **PLACEHOLDER — not yet implemented.**
+### Prerequisites
 
-Planned content:
+- Python 3.12+
+- Docker + Docker Compose (Neo4j stack and the test suite)
+- Neo4j 5.x — Community is enough to develop against; **Enterprise is required if you
+  want read/write account separation**, because RBAC (`CREATE ROLE` / `GRANT`) is an
+  Enterprise feature
 
-- Prerequisites (Python version, Neo4j 5.x, n10s plugin, JVM for `onto-infer`)
-- `pip install` command
-- Neo4j setup with n10s and the `n10s:Resource.uri` uniqueness constraint
-- Registering the server with Claude Code / Codex / other MCP clients
-- Optional: installing `onto-infer`
+### Install
 
----
+```bash
+git clone https://github.com/yifanzhao2023/fan-enterprise-ontology-mcp.git
+cd fan-enterprise-ontology-mcp
+python -m venv .venv
+.venv/bin/pip install -e ".[dev]"          # Windows: .venv\Scripts\pip install -e ".[dev]"
+```
 
+### Start Neo4j
+
+```bash
+docker compose up -d --wait
+```
+
+Brings up Neo4j 5.26 Community on `bolt://localhost:7687` (`neo4j` / `password`).
+APOC is deliberately not installed: the Cypher guard rejects every `apoc.*` call, so
+leaving the plugin out means the database cannot run one either.
+
+### Build the schema projection
+
+```bash
+make projection
+```
+
+`schema.projection.json` is generated from `TBox.ttl` + `shapes.ttl`. **Commit it** —
+CI fails when it is stale.
+
+### Load the sample data
+
+```bash
+make seed
+```
+
+Reads `ontology/abox.ttl` and writes it through the same representation writer the MCP
+tools use. To replace the sample ontology with your own, see
+[`ontology/README.md`](ontology/README.md).
+
+### Register with a coding agent
+
+The server speaks MCP over stdio. The command is the console script inside your venv —
+**use the absolute path**, because the agent's environment will not have your venv activated.
+
+**Claude Code** — `.mcp.json` in the project root:
+
+```json
+{
+  "mcpServers": {
+    "feomcp": {
+      "command": "/abs/path/to/.venv/bin/feomcp",
+      "args": [],
+      "env": {
+        "FEOMCP_ONTOLOGY_DIR": "/abs/path/to/ontology",
+        "FEOMCP_NEO4J_URI": "bolt://localhost:7687",
+        "FEOMCP_NEO4J_USER": "reader",
+        "FEOMCP_NEO4J_PASSWORD": "…",
+        "FEOMCP_NEO4J_WRITE_USER": "writer",
+        "FEOMCP_NEO4J_WRITE_PASSWORD": "…"
+      }
+    }
+  }
+}
+```
+
+or `claude mcp add feomcp -- /abs/path/to/.venv/bin/feomcp`.
+
+**Codex** — `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.feomcp]
+command = "/abs/path/to/.venv/bin/feomcp"
+
+[mcp_servers.feomcp.env]
+FEOMCP_ONTOLOGY_DIR = "/abs/path/to/ontology"
+FEOMCP_NEO4J_URI = "bolt://localhost:7687"
+FEOMCP_NEO4J_USER = "reader"
+FEOMCP_NEO4J_PASSWORD = "…"
+```
+
+**Any other MCP client** — stdio transport, command `feomcp` (equivalently
+`python -m feomcp.server`).
+
+> The server refuses to start when the query and write accounts are the same account.
+> Give the query account `MATCH`-only privileges, or set
+> `FEOMCP_ALLOW_SHARED_ACCOUNT=1` for development.
+
+### Verify
+
+```bash
+make demo
+```
+
+Starts Neo4j, regenerates the projection, loads the sample ABox and runs every
+competency question against its expected result.
 ## 9. Configuration
 
 Environment variables. No config framework.
 
+| Variable | Default | Purpose |
+|---|---|---|
+| `FEOMCP_STORE` | `neo4j` | Storage adapter |
+| `FEOMCP_NEO4J_URI` | `bolt://localhost:7687` | Neo4j bolt URI |
+| `FEOMCP_NEO4J_USER` | `neo4j` | Read-only account (query tools) |
+| `FEOMCP_NEO4J_PASSWORD` | *(empty)* | |
+| `FEOMCP_NEO4J_WRITE_USER` | *same as `FEOMCP_NEO4J_USER`* | Read-write account (write tools) |
+| `FEOMCP_NEO4J_WRITE_PASSWORD` | *same as `FEOMCP_NEO4J_PASSWORD`* | |
+| `FEOMCP_ONTOLOGY_DIR` | `ontology/` | TBox, shapes, queries, manifest, projection, ABox |
+| `FEOMCP_QUERY_TIMEOUT_MS` | `10000` | Per-query timeout |
+| `FEOMCP_MAX_ROWS` | `50` | Result row cap (also stops reading early) |
+| `FEOMCP_MAX_QUERY_LENGTH` | `8192` | Query string length cap |
+| `FEOMCP_MAX_BATCH` | `500` | Single write batch cap |
+| `FEOMCP_REDACT_FIELDS` | *(empty)* | Comma-separated field names masked at read time |
+| `FEOMCP_ALLOW_SHARED_ACCOUNT` | `0` | `1` permits query and write to share one account (development only) |
 
-| Variable                      | Default     | Purpose                                  |
-| ----------------------------- | ----------- | ---------------------------------------- |
-| `BEOMCP_STORE`                | `neo4j`     | Storage adapter                          |
-| `BEOMCP_NEO4J_URI`            | —           | Neo4j bolt URI                           |
-| `BEOMCP_NEO4J_USER`           | —           | Read-only account (query tools)          |
-| `BEOMCP_NEO4J_PASSWORD`       | —           |                                          |
-| `BEOMCP_NEO4J_WRITE_USER`     | —           | Read-write account (write tools)         |
-| `BEOMCP_NEO4J_WRITE_PASSWORD` | —           |                                          |
-| `BEOMCP_ONTOLOGY_DIR`         | `ontology/` | TBox, shapes, rules, queries, projection |
-| `BEOMCP_QUERY_TIMEOUT_MS`     | `10000`     | Per-query timeout                        |
-| `BEOMCP_MAX_ROWS`             | `50`        | Result row cap                           |
-| `BEOMCP_MAX_QUERY_LENGTH`     | `8192`      | Query string length cap                  |
-| `BEOMCP_MAX_BATCH`            | —           | Single write batch cap                   |
-| `BEOMCP_REDACT_FIELDS`        | —           | Field paths to redact on read            |
+**Privilege separation is native database accounts**, not code branches. The server keeps
+two driver sessions and routes by tool group: query tools (1–6, 9, 10) use the read-only
+account, write tools (7, 8) use the read-write account.
 
+`build_server` refuses to start when both point at the same account unless
+`FEOMCP_ALLOW_SHARED_ACCOUNT=1` is set.
 
-**Privilege separation is native database accounts**, not code branches. The server keeps two driver sessions and routes by tool group. Query tools (1–6, 9, 10) use the read-only account; write tools (7, 8) use the read-write account. The JVM holds neither.
+Defaults assume the `docker compose` stack. Production must set the account variables.
 
 ---
 
 ## 10. Quick Start
 
-> **PLACEHOLDER — not yet implemented.**
+```bash
+# 1. bring up Neo4j
+docker compose up -d --wait
 
-Planned content:
+# 2. generate the schema projection and load the sample ABox
+make seed
 
-1. Start Neo4j + n10s (`docker compose up`)
-2. Load the sample ontology and sample ABox
-3. Run `onto-infer`
-4. Run the competency question suite (`make demo`)
-5. Connect Claude Code / Codex and ask a business question
-6. Expected output for a known sample query
+# 3. run every competency question against its expected result
+make demo
+```
+
+Then point an agent at the server (see [Installation](#8-installation)) and ask a
+business question. A good first one:
+
+> Using the ontology, which contracts does customerA have that are over 1,000,000?
+
+The agent should call `search_schema` / `list_queries` first, then
+`run_query("contracts_over_amount_by_customer", {...})` — not write raw Cypher.
+
+To see the tools without an agent:
+
+```bash
+.venv/bin/python -m feomcp.server      # starts the MCP stdio server
+```
+
+**This is a sample domain.** `ontology/` models enterprise contract management purely
+so the stack runs out of the box — see [`ontology/README.md`](ontology/README.md) for
+how to replace it with your own ontology.
 
 ---
 
@@ -375,7 +507,7 @@ Planned content:
 3. **Whitelist is default-deny** and near-empty: built-in read-only functions only. Schema introspection goes through `get_schema()`, so nothing forces the whitelist open. Any procedure added later goes into an explicit config list, off by default.
 4. **Resource caps** — query timeout, row cap, query length cap, write batch cap.
 5. **Audit log** — `tool` / parameter digest / `principal` (caller identity: agent session ID or service account) / `timestamp` / `duration` / `row_count` / `ok`. Full result bodies are **not** logged.
-6. **Field redaction at read time** — `BEOMCP_REDACT_FIELDS` masks values on query return. Storage keeps complete data; writes do not redact. Redaction covers violation details too (`list_violations` messages often embed field values). v1 is global config, not per-principal.
+6. **Field redaction at read time** — `FEOMCP_REDACT_FIELDS` masks values on query return. Storage keeps complete data; writes do not redact. Redaction covers violation details too (`list_violations` messages often embed field values). v1 is global config, not per-principal.
    ```
     # ponytail: field redaction + account separation + audit only; triple-level RBAC/ABAC
     # deferred until compliance requirements are concrete

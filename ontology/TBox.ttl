@@ -1,0 +1,72 @@
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix onto: <https://example.org/onto#> .
+
+onto:BusinessDocument a owl:Class ;
+    rdfs:label "业务文档"@zh , "Business document"@en .
+
+onto:Contract a owl:Class ;
+    rdfs:subClassOf onto:BusinessDocument ;
+    rdfs:label "合同"@zh , "Contract"@en .
+
+onto:Customer a owl:Class ;
+    rdfs:label "客户"@zh , "Customer"@en .
+
+onto:Department a owl:Class ;
+    rdfs:label "部门"@zh , "Department"@en .
+
+onto:Employee a owl:Class ;
+    rdfs:label "员工"@zh , "Employee"@en .
+
+onto:WorkOrder a owl:Class ;
+    rdfs:label "工单"@zh , "Work order"@en .
+
+# --- object properties ---
+
+onto:belongsToCustomer a owl:ObjectProperty ;
+    rdfs:domain onto:Contract ;
+    rdfs:range  onto:Customer ;
+    rdfs:label "归属客户"@zh , "belongs to customer"@en .
+
+onto:belongsToDepartment a owl:ObjectProperty ;
+    rdfs:domain onto:WorkOrder ;
+    rdfs:range  onto:Department ;
+    rdfs:label "归属部门"@zh , "belongs to department"@en .
+
+onto:hasHead a owl:ObjectProperty ;
+    rdfs:domain onto:Department ;
+    rdfs:range  onto:Employee ;
+    rdfs:label "负责人"@zh , "has head"@en .
+
+onto:hasOwner a owl:ObjectProperty ;
+    rdfs:domain onto:WorkOrder ;
+    rdfs:range  onto:Employee ;
+    rdfs:label "工单负责人"@zh , "has owner"@en .
+
+onto:worksFor a owl:ObjectProperty ;
+    rdfs:domain onto:Employee ;
+    rdfs:range  onto:Department ;
+    rdfs:label "任职于"@zh , "works for"@en .
+
+# --- datatype properties ---
+
+onto:hasAmount a owl:DatatypeProperty ;
+    rdfs:domain onto:Contract ;
+    rdfs:range  xsd:decimal ;
+    rdfs:label "金额"@zh , "amount"@en .
+
+onto:hasStatus a owl:DatatypeProperty ;
+    rdfs:domain onto:Contract ;
+    rdfs:range  xsd:string ;
+    rdfs:label "状态"@zh , "status"@en .
+
+onto:archived a owl:DatatypeProperty ;
+    rdfs:domain onto:Contract ;
+    rdfs:range  xsd:boolean ;
+    rdfs:label "已归档"@zh , "archived"@en .
+
+onto:hasName a owl:DatatypeProperty ;
+    rdfs:domain onto:Customer ;
+    rdfs:range  xsd:string ;
+    rdfs:label "名称"@zh , "name"@en .
