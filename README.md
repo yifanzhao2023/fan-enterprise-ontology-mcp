@@ -317,9 +317,18 @@ ontology://schema     Full projection (large; human reference only, never into a
 | Claude Code skills | yes         | **no**                   | Invocation-habit wrapper only |
 
 
-**Knowledge must live in MCP resources** (at minimum `ontology://playbook`). Skills only wrap Claude Code habits. Otherwise Codex gets bare tools and nothing tells it "call `search_schema` first, then `list_queries`, and only then `query_raw`".
+**Knowledge lives in MCP resources and prompts** (at minimum `ontology://playbook`).
+A skill is a thin wrapper — it must not restate the playbook, or the two will drift.
+Otherwise Codex gets bare tools and nothing tells it "call `search_schema` first,
+then `list_queries`, and only then `query_raw`".
 
-Skills hold: the decision tree, CQ examples, error-retry patterns, and when to suspect stale derived facts.
+The skill (`skills/beomcp/SKILL.md`) carries the trigger conditions, the order of
+operations and the Claude Code habits that are not client-agnostic. Install it:
+
+```bash
+mkdir -p .claude/skills && cp -r skills/beomcp .claude/skills/   # this project
+cp -r skills/beomcp ~/.claude/skills/                            # every project
+```
 
 ---
 

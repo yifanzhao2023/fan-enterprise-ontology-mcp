@@ -314,9 +314,14 @@ ontology://schema     完整投影（大，仅人工查阅，永不进 prompt）
 | Claude Code skills | 用           | **不用** | 调用习惯包装          |
 
 
-**知识必须落在 MCP resource**（至少 `ontology://playbook`）。skill 只包 Claude Code 侧的调用习惯。否则 Codex 拿到一堆裸工具，没人告诉它「先 `search_schema`，再 `list_queries`，最后才 `query_raw`」。
+**知识落在 MCP resource 与 prompt**（至少 `ontology://playbook`）。skill 只是薄壳——**不要在 skill 里复述 playbook**，否则两边必然漂移。否则 Codex 拿到一堆裸工具，没人告诉它「先 `search_schema`，再 `list_queries`，最后才 `query_raw`」。
 
-skills 里放：决策树、CQ 示例、错误重试套路、「什么时候该怀疑派生事实陈旧」。
+skill（`skills/beomcp/SKILL.md`）承载触发条件、操作顺序，以及 Claude Code 特有、不可跨客户端的那些习惯。安装：
+
+```bash
+mkdir -p .claude/skills && cp -r skills/beomcp .claude/skills/   # 本项目
+cp -r skills/beomcp ~/.claude/skills/                            # 所有项目
+```
 
 ---
 
