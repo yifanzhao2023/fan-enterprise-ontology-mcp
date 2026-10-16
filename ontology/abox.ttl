@@ -2,15 +2,34 @@
 @prefix ex:   <https://example.org/id/> .
 
 # Sample ABox for the enterprise contract management domain.
-# This is example data — replace it with your own, or load your own through
-# the MCP upsert tools.
+# Example data — replace it with your own, or write your own through the MCP
+# upsert tools. Every CQ in manifest.json is regression-tested against this file.
+
+# ---------- 客户 ----------
 
 ex:customerA a onto:Customer ;
     onto:hasName "客户A" .
 
-ex:departmentSales a onto:Department .
+ex:customerB a onto:Customer ;
+    onto:hasName "客户B" .
 
+ex:customerC a onto:Customer ;
+    onto:hasName "客户C" .        # 有意零合同，用于「查不到」对照
+
+# ---------- 部门 ----------
+
+ex:departmentSales a onto:Department .
+ex:departmentLegal a onto:Department .
+
+# ---------- 员工 ----------
+
+ex:employeeLi a onto:Employee .
+ex:employeeWang a onto:Employee .
 ex:employeeZhang a onto:Employee .
+ex:employeeZhao a onto:Employee .
+
+# ---------- 合同 ----------
+# 金额跨 50 万 / 80 万 / 120 万 / 150 万 / 200 万，archived 与 hasStatus 独立
 
 ex:contract001 a onto:Contract ;
     onto:hasAmount 1200000 ;
@@ -18,10 +37,54 @@ ex:contract001 a onto:Contract ;
     onto:archived false ;
     onto:belongsToCustomer ex:customerA .
 
+ex:contract002 a onto:Contract ;
+    onto:hasAmount 800000 ;
+    onto:hasStatus "draft" ;
+    onto:archived false ;
+    onto:belongsToCustomer ex:customerA .
+
+ex:contract003 a onto:Contract ;
+    onto:hasAmount 500000 ;
+    onto:hasStatus "closed" ;
+    onto:archived true ;
+    onto:belongsToCustomer ex:customerA .
+
+ex:contract004 a onto:Contract ;
+    onto:hasAmount 1500000 ;
+    onto:hasStatus "draft" ;
+    onto:archived false ;
+    onto:belongsToCustomer ex:customerB .
+
+ex:contract005 a onto:Contract ;
+    onto:hasAmount 2000000 ;
+    onto:hasStatus "active" ;
+    onto:archived true ;
+    onto:belongsToCustomer ex:customerB .
+
+# ---------- 工单 ----------
+
 ex:wo001 a onto:WorkOrder ;
     onto:belongsToDepartment ex:departmentSales ;
     onto:hasOwner ex:employeeZhang .
 
-ex:departmentSales onto:hasHead ex:employeeZhang .
+ex:wo002 a onto:WorkOrder ;
+    onto:belongsToDepartment ex:departmentSales ;
+    onto:hasOwner ex:employeeZhao .
 
+ex:wo003 a onto:WorkOrder ;
+    onto:belongsToDepartment ex:departmentSales ;
+    onto:hasOwner ex:employeeWang .
+
+ex:wo004 a onto:WorkOrder ;
+    onto:belongsToDepartment ex:departmentLegal ;
+    onto:hasOwner ex:employeeLi .
+
+# ---------- 组织关系 ----------
+
+ex:departmentSales onto:hasHead ex:employeeZhang .
+ex:departmentLegal onto:hasHead ex:employeeLi .
+
+ex:employeeLi    onto:worksFor ex:departmentLegal .
+ex:employeeWang  onto:worksFor ex:departmentSales .
 ex:employeeZhang onto:worksFor ex:departmentSales .
+ex:employeeZhao  onto:worksFor ex:departmentSales .

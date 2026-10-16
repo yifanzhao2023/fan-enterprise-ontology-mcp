@@ -56,3 +56,17 @@ def test_projection_without_classes_is_rejected(tmp_path):
     (tmp_path / "schema.projection.json").write_text('{"version": 1}', encoding="utf-8")
     with pytest.raises(ValueError, match="schema projection"):
         SchemaCatalog.load(tmp_path)
+
+
+def test_search_finds_a_property_by_chinese_label():
+    """The domain vocabulary is Chinese; a search for 归档 must reach `archived`."""
+    s = SchemaCatalog.load(Path("ontology"))
+    hits = s.search("归档", limit=10)
+    names = {h["name"] for h in hits}
+    assert "archived" in names
+
+
+def test_search_finds_a_relation_by_chinese_label():
+    s = SchemaCatalog.load(Path("ontology"))
+    hits = s.search("归属客户", limit=10)
+    assert "belongsToCustomer" in {h["name"] for h in hits}

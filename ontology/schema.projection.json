@@ -279,6 +279,10 @@
       "domain": "Contract",
       "iri": "https://example.org/onto#archived",
       "kind": "datatype",
+      "labels": [
+        "archived",
+        "已归档"
+      ],
       "name": "archived",
       "range": "boolean"
     },
@@ -286,6 +290,10 @@
       "domain": "Contract",
       "iri": "https://example.org/onto#belongsToCustomer",
       "kind": "object",
+      "labels": [
+        "belongs to customer",
+        "归属客户"
+      ],
       "name": "belongsToCustomer",
       "range": "Customer"
     },
@@ -293,6 +301,10 @@
       "domain": "WorkOrder",
       "iri": "https://example.org/onto#belongsToDepartment",
       "kind": "object",
+      "labels": [
+        "belongs to department",
+        "归属部门"
+      ],
       "name": "belongsToDepartment",
       "range": "Department"
     },
@@ -300,6 +312,10 @@
       "domain": "Contract",
       "iri": "https://example.org/onto#hasAmount",
       "kind": "datatype",
+      "labels": [
+        "amount",
+        "金额"
+      ],
       "name": "hasAmount",
       "range": "decimal"
     },
@@ -307,6 +323,10 @@
       "domain": "Department",
       "iri": "https://example.org/onto#hasHead",
       "kind": "object",
+      "labels": [
+        "has head",
+        "负责人"
+      ],
       "name": "hasHead",
       "range": "Employee"
     },
@@ -314,6 +334,10 @@
       "domain": "Customer",
       "iri": "https://example.org/onto#hasName",
       "kind": "datatype",
+      "labels": [
+        "name",
+        "名称"
+      ],
       "name": "hasName",
       "range": "string"
     },
@@ -321,6 +345,10 @@
       "domain": "WorkOrder",
       "iri": "https://example.org/onto#hasOwner",
       "kind": "object",
+      "labels": [
+        "has owner",
+        "工单负责人"
+      ],
       "name": "hasOwner",
       "range": "Employee"
     },
@@ -328,6 +356,10 @@
       "domain": "Contract",
       "iri": "https://example.org/onto#hasStatus",
       "kind": "datatype",
+      "labels": [
+        "status",
+        "状态"
+      ],
       "name": "hasStatus",
       "range": "string"
     },
@@ -335,6 +367,10 @@
       "domain": "Employee",
       "iri": "https://example.org/onto#worksFor",
       "kind": "object",
+      "labels": [
+        "works for",
+        "任职于"
+      ],
       "name": "worksFor",
       "range": "Department"
     }

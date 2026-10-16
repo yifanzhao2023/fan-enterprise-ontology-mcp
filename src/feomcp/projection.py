@@ -52,6 +52,7 @@ def build_projection(tbox_path: Path, shapes_path: Path) -> dict[str, Any]:
         properties.append({
             "iri": str(prop),
             "name": name,
+            "labels": sorted(str(l) for l in tbox.objects(prop, RDFS.label)),
             "kind": kind,
             "domain": domains[0] if domains else None,
             "range": ranges[0] if ranges else None,
