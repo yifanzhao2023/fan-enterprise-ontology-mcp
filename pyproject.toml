@@ -9,7 +9,7 @@ description = "MCP server exposing an enterprise ontology as an agent semantic m
 requires-python = ">=3.12"
 license = { text = "Apache-2.0" }
 dependencies = [
-  "mcp>=1.2.0",
+  "mcp>=2.0",
   "neo4j>=5.26.0",
   "rdflib>=7.1.0",
   "pyshacl>=0.26.0",
