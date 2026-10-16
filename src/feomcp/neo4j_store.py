@@ -424,9 +424,12 @@ def _write_literal(tx, iri: str, key: str, value: Any, *, inferred: bool) -> Non
 def _write_relation(tx, rel: Relation, *, inferred: bool) -> None:
     name = pred_name(rel.predicate_iri)
     # Relationships cannot carry labels in Neo4j — use a property marker.
-    suffix = " SET r.inferred = true" if inferred else ""
+    # Only a brand-new edge may be marked derived. Stamping an existing ABox edge
+    # would make the next rebuild's `WHERE r.inferred = true DELETE r` destroy a
+    # fact someone wrote on purpose.
+    mark = " ON CREATE SET r.inferred = true" if inferred else ""
     tx.run(
         f"MATCH (a {{uri: $s}}), (b {{uri: $t}}) "
-        f"MERGE (a)-[r:`{name}`]->(b){suffix}",
+        f"MERGE (a)-[r:`{name}`]->(b){mark}",
         {"s": rel.source_iri, "t": rel.target_iri},
     )

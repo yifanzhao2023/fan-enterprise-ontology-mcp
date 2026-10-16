@@ -425,3 +425,57 @@ def test_materialize_rdf_excludes_internal_metadata_nodes(store, tmp_path):
     subjects = {str(s) for s in g.subjects()}
     assert not any(s.startswith("urn:feomcp:") for s in subjects), subjects
     assert "https://example.org/id/c9" in subjects
+
+
+def test_derived_relation_never_claims_an_abox_edge(store, tmp_path):
+    """An edge someone wrote on purpose must not become a derived edge.
+
+    If it does, the next rebuild's `WHERE r.inferred = true DELETE r` destroys it.
+    """
+    store.upsert(WriteBatch(
+        entities=[
+            Entity("https://example.org/id/woA", (TBox + "WorkOrder",), {}),
+            Entity("https://example.org/id/empA", (TBox + "Employee",), {}),
+            Entity("https://example.org/id/deptA", (TBox + "Department",), {}),
+        ],
+        relations=[
+            # WorkOrderShape requires belongsToDepartment
+            Relation(
+                "https://example.org/id/woA",
+                TBox + "belongsToDepartment",
+                "https://example.org/id/deptA",
+            ),
+            Relation(
+                "https://example.org/id/woA", TBox + "hasOwner", "https://example.org/id/empA",
+            ),
+        ],
+    ))
+    inf = tmp_path / "inferred.ttl"
+    inf.write_text(
+        "@prefix onto: <https://example.org/onto#> .\n"
+        "<https://example.org/id/woA> onto:hasOwner <https://example.org/id/empA> .\n",
+        encoding="utf-8",
+    )
+    vis = tmp_path / "violations.ttl"
+    vis.write_text("", encoding="utf-8")
+
+    store.replace_derived(inf, vis)
+    store.replace_derived(inf, vis)
+
+    rows = store.submit(
+        "MATCH (:WorkOrder {uri: $s})-[r:hasOwner]->(:Employee {uri: $t}) "
+        "RETURN count(r) AS c, r.inferred AS marked",
+        {"s": "https://example.org/id/woA", "t": "https://example.org/id/empA"},
+    )
+    assert rows[0]["c"] == 1
+    assert rows[0]["marked"] in (None, False)
+
+    # And the consequence: once the rule stops deriving that edge, the ABox edge
+    # must still be there. If it was claimed as derived, the rebuild ate it.
+    inf.write_text("", encoding="utf-8")
+    store.replace_derived(inf, vis)
+    rows = store.submit(
+        "MATCH (:WorkOrder {uri: $s})-[r:hasOwner]->(:Employee {uri: $t}) RETURN count(r) AS c",
+        {"s": "https://example.org/id/woA", "t": "https://example.org/id/empA"},
+    )
+    assert rows[0]["c"] == 1
