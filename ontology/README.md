@@ -450,16 +450,90 @@ A: [{"amount": 500000}]     ← 回读验证，别只看 applied: true
 
 ---
 
-## 13. Plan 2 场景（依赖推理机，v1 跑不了）
+## 13. 推理场景（跑过 `make infer` 之后）
 
-下面这些**才是本体最强的卖点**，但需要离线推理（`onto-infer` + JVM `rules-runner`），v1 没有。
-列在这里是为了标明边界，**不要在 v1 的示例里写它们**：
+下面这些要离线推理（`make infer`）才有。先 `make seed` 再 `make infer`，然后照抄。
 
-| 场景 | 需要什么 |
-|---|---|
-| 「部门负责人的工单」——自动推出负责人也是工单负责人 | 属性链规则 `belongsToDepartment . hasHead → hasOwner` |
-| 「未归档且超 100 万的重点合同」 | 带算术的类定义，OWL 表达不了，要 Jena Rules |
-| 「谁在什么时候改了这份合同」（合规审计） | 变更日志 + 时序语义（OWL-Time / ISO 8601） |
-| 「合同到期了吗」 | 同上，时序本体 |
+### 13.1 部门负责人工单
 
-这些都是设计文档 §八 明列的缺口。等 Plan 2 落地后，本节转成可运行示例。
+部门负责人默认也是该部门工单的负责人。规则 `belongsToDepartment . hasHead -> hasOwner`：
+
+```
+run_query("work_orders_by_department", {"department_iri": "https://example.org/id/departmentSales"})
+```
+
+推出来两条**派生边**（`r.inferred = true`）：
+
+| 工单 | 派生负责人 | 说明 |
+|---|---|---|
+| wo002 | employeeZhang | 原负责人是赵六，张三（部门负责人）是额外负责人 |
+| wo003 | employeeZhang | 原负责人是王五 |
+
+wo001、wo004 **没有**派生边——推出来的结论和 ABox 已有的边重合，被吸收了。所以
+`MATCH ()-[r]->() WHERE r.inferred = true` 只有两条，不是四条。
+
+> 注意 `work_orders_by_department` 现在每个工单可能返回多行（一个负责人一行）。
+> 这是设计使然：查询结果不隐藏派生事实，判断答案依赖不依赖派生是调用方的事。
+
+### 13.2 重点合同
+
+金额超过 100 万。**带算术的类定义，OWL 公理表达不了**，只能写在 `rules/business.rules` 里。
+是否归档是查询侧的当前状态，不进类定义——归档了也还是重点合同。
+
+```
+run_query("contracts_by_key_and_archive_state", {"archived": false})
+```
+
+```
+contract004  1500000.0
+contract001  1200000.0
+```
+
+`contract005`（200 万）也是重点合同，但 `archived: true`，被这个过滤条件挡掉了。
+查全部重点合同就把 `archived` 传 `null`。
+
+### 13.3 合规审计：谁在什么时候改了这份合同
+
+**这不是推理问题**，是要查询得到的变更日志。每次写入的每个字段都会落一条 `:ChangeEvent`：
+
+```
+run_query("contract_change_history", {"contract_iri": "https://example.org/id/contract001"})
+```
+
+```
+at=2026-10-16T14:32:13+00:00  actor=system  predicate=hasEndDate
+old_value=null  new_value=2027-03-31 00:00:00
+```
+
+- 值没变就不记——重复写同一份合同不等于有人改过它
+- 变更日志是只追加的运维历史，不是 ABox：推理重建不会碰它，也不会进 `abox.ttl`
+- 时序语义就是 `xsd:dateTime`。没建 OWL-Time 模块——当前的问题只要「谁/什么时候/改了哪个字段」，
+  建时序本体是给还没有的问题付建模成本。等真问出「两份合同的时间区间有没有重叠」再建。
+
+### 13.4 合同到期了吗
+
+```
+run_query("contract_expiry_status",
+          {"contract_iri": "https://example.org/id/contract001", "as_of": "2026-10-16"})
+```
+
+```
+contract001  end_date=2027-03-31  status=active
+contract004  end_date=2025-01-01  status=expired
+```
+
+**这是查询，不是派生标签。** 理由是可复现性：`onto-infer` 是纯函数，重放同样的输入必须得到同样的输出；
+读墙钟的规则做不到。真要 `:Expired` 标签，把 `as_of` 作为记录进作业指纹的输入传下去即可。
+
+### 13.5 派生事实有多新
+
+```
+get_inference_status()
+```
+
+`stale` 在任何写入之后就是 `true`，直到下一次 `onto-infer`。**陈旧是常态，不是故障。**
+不要在 `stale: true` 的时候用派生事实答题而不说明。
+
+---
+
+上面四条以前是「v1 跑不了」的缺口。现在都能跑了；到期那条按上面说的走查询，不走派生。

@@ -8,7 +8,7 @@ export FEOMCP_NEO4J_USER ?= neo4j
 export FEOMCP_NEO4J_PASSWORD ?= password
 export FEOMCP_NEO4J_URI ?= bolt://localhost:7687
 
-.PHONY: demo test unit integration e2e lint-projection projection seed up down rules-runner
+.PHONY: demo test unit integration e2e lint-projection projection seed up down rules-runner infer ci-infer-gate
 
 up:
 	docker compose up -d --wait
@@ -38,7 +38,12 @@ integration: rules-runner
 e2e: projection
 	$(PYTHON) -m pytest tests/e2e -v
 
+infer: rules-runner
+	$(PYTHON) -m feomcp.cli infer
+
+ci-infer-gate: lint-projection unit demo
+
 test: unit integration
 
-demo: up seed
+demo: up seed infer
 	$(PYTHON) -m pytest tests/e2e -v

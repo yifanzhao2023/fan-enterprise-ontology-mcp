@@ -370,7 +370,7 @@ make projection
 `schema.projection.json` is generated from `TBox.ttl` + `shapes.ttl`. **Commit it** —
 CI fails when it is stale.
 
-### Load the sample data
+### Load the sample data(Optional)
 
 ```bash
 make seed
@@ -379,6 +379,20 @@ make seed
 Reads `ontology/abox.ttl` and writes it through the same representation writer the MCP
 tools use. To replace the sample ontology with your own, see
 [`ontology/README.md`](ontology/README.md).
+
+### Build the derived layer
+
+Derived facts (`:INFERRED`) are produced by an offline batch job, never by a tool call:
+
+```bash
+make infer
+```
+
+This exports the ABox, runs `ontology/rules/*.rules` in a JVM that has no database
+access, validates the merged graph with SHACL, and replaces the derived layer in one
+transaction. Check `get_inference_status()` before answering from a derived fact —
+`stale: true` means something has been written since the last run. See
+[`ontology/README.md`](ontology/README.md) section 13 for the scenarios that need it.
 
 ### Register with a coding agent
 

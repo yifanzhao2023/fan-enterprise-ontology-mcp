@@ -149,7 +149,7 @@
         },
         {
           "iri": "https://example.org/onto#hasOwner",
-          "max": 1,
+          "max": null,
           "min": null,
           "name": "hasOwner",
           "source": "WorkOrder"
@@ -199,7 +199,7 @@
         },
         {
           "iri": "https://example.org/onto#hasOwner",
-          "max": 1,
+          "max": null,
           "min": null,
           "name": "hasOwner",
           "target": "Employee"
@@ -288,11 +288,6 @@
         "kind": "class",
         "path": "hasOwner",
         "value": "https://example.org/onto#Employee"
-      },
-      {
-        "kind": "maxCount",
-        "path": "hasOwner",
-        "value": "1"
       }
     ]
   },

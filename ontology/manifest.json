@@ -73,7 +73,7 @@
       },
       "sample_result": [
         {
-          "amount": 1200000
+          "amount": 1200000.0
         }
       ],
       "uses": [
@@ -243,7 +243,15 @@
         },
         {
           "work_order_iri": "https://example.org/id/wo002",
+          "owner_iri": "https://example.org/id/employeeZhang"
+        },
+        {
+          "work_order_iri": "https://example.org/id/wo002",
           "owner_iri": "https://example.org/id/employeeZhao"
+        },
+        {
+          "work_order_iri": "https://example.org/id/wo003",
+          "owner_iri": "https://example.org/id/employeeZhang"
         },
         {
           "work_order_iri": "https://example.org/id/wo003",
@@ -284,6 +292,12 @@
       "sample_result": [
         {
           "work_order_iri": "https://example.org/id/wo001"
+        },
+        {
+          "work_order_iri": "https://example.org/id/wo002"
+        },
+        {
+          "work_order_iri": "https://example.org/id/wo003"
         }
       ],
       "uses": [
@@ -359,6 +373,10 @@
         {
           "customer_iri": "https://example.org/id/customerB",
           "contract_count": 2
+        },
+        {
+          "customer_iri": "https://example.org/id/customerC",
+          "contract_count": 2
         }
       ],
       "uses": [
@@ -389,7 +407,7 @@
       "sample_result": [
         {
           "status": "draft",
-          "contract_count": 3
+          "contract_count": 5
         },
         {
           "status": "active",
@@ -491,7 +509,7 @@
       "sample_result": [
         {
           "contract_iri": "https://example.org/id/contract001",
-          "end_date": "2027-03-31T00:00:00",
+          "end_date": "2027-03-31T00:00:00.000000000",
           "status": "active"
         }
       ],
@@ -540,7 +558,7 @@
       "sample_params": {
         "contract_iri": "https://example.org/id/contract001"
       },
-      "sample_result": [],
+      "sample_result": null,
       "uses": [],
       "tags": [
         "审计"

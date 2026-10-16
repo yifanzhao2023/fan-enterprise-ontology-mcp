@@ -360,7 +360,7 @@ make projection
 
 `schema.projection.json` 由 `TBox.ttl` + `shapes.ttl` 编译而来。**要一起提交**——过期 CI 会红。
 
-### 载入样例数据
+### 载入样例数据（可选）
 
 ```bash
 make seed
@@ -368,6 +368,19 @@ make seed
 
 读 `ontology/abox.ttl`，走 MCP 写入工具同一套表示写入器写进 Neo4j。要把样例本体换成你自己的，
 看 [`ontology/README.md`](ontology/README.md)。
+
+### 构建派生层
+
+派生事实（`:INFERRED`）由离线批作业产生，**任何工具调用都不会触发**：
+
+```bash
+make infer
+```
+
+它导出 ABox，在一个没有数据库访问权限的 JVM 里跑 `ontology/rules/*.rules`，
+用 SHACL 校验合并图，然后单事务整体替换派生层。用派生事实答题之前先看
+`get_inference_status()`——`stale: true` 表示上次跑完之后又有写入。
+需要它的场景见 [`ontology/README.md`](ontology/README.md) 第 13 节。
 
 ### 注册进 coding agent
 
