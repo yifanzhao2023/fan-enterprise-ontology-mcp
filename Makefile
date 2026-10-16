@@ -9,7 +9,7 @@ export BEOMCP_NEO4J_USER ?= neo4j
 export BEOMCP_NEO4J_PASSWORD ?= password
 export BEOMCP_NEO4J_URI ?= bolt://localhost:7687
 
-.PHONY: demo test unit integration e2e lint-projection projection up down
+.PHONY: demo test unit integration e2e lint-projection projection seed up down
 
 up:
 	docker compose up -d --wait
@@ -19,6 +19,9 @@ down:
 
 projection:
 	$(PYTHON) -m beomcp.cli project
+
+seed: projection
+	$(PYTHON) -m beomcp.cli seed --abox ontology/abox.ttl
 
 lint-projection: projection
 	git diff --exit-code -- ontology/schema.projection.json || \
@@ -35,5 +38,5 @@ e2e: projection
 
 test: unit integration
 
-demo: up projection
+demo: up seed
 	$(PYTHON) -m pytest tests/e2e -v

@@ -36,8 +36,9 @@ class QueryDef:
 
 
 class Catalog:
-    def __init__(self, queries: Mapping[str, QueryDef]) -> None:
+    def __init__(self, queries: Mapping[str, QueryDef], namespace: str = "") -> None:
         self._queries = dict(queries)
+        self.namespace = namespace
 
     @classmethod
     def load(cls, ontology_dir: Path) -> "Catalog":
@@ -68,7 +69,7 @@ class Catalog:
                 tags=tuple(raw.get("tags", [])),
                 cypher=cypher,
             )
-        return cls(by_name)
+        return cls(by_name, manifest.get("namespace", ""))
 
     def list(self, domain: str | None = None) -> Sequence[QueryDef]:
         defs = list(self._queries.values())

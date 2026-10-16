@@ -101,6 +101,12 @@ Agent 读取本体 Schema、查询命名能力问题或裸 Cypher、写入经过
 | 4   | Skills + MCP prompts                           | Claude Code skill 包调用习惯；Codex 读 MCP prompts/resources              |
 
 
+> **`ontology/` 里是可跑通的样例，不是你的本体。** 这些文件建的是一个样例域——企业合同管理——
+> 目的是让 server 开箱能跑、CI 有东西可回归。请换成你自己的 `TBox.ttl`、`shapes.ttl`、
+> `queries/*.cypher` 与 `manifest.json`，Python 代码一行都不用改。改完 TBox 记得跑
+> `onto project` 重新生成 `schema.projection.json`（否则 CI 拦），新查询必须登记进
+> `manifest.json`——`Catalog.load` 会拿每条的 `uses` 去投影里核对，对不上直接拒启动。
+
 ### 数据分层
 
 
@@ -316,55 +322,156 @@ skills 里放：决策树、CQ 示例、错误重试套路、「什么时候该�
 
 ## 8. 安装
 
-> **占位 —— 尚未实现。**
+### 前置条件
 
-计划内容：
+- Python 3.12+
+- Docker + Docker Compose（Neo4j 与测试套件）
+- Neo4j 5.x —— 开发用 Community 足够；**要做读写账号分离必须 Enterprise**，因为
+  RBAC（`CREATE ROLE` / `GRANT`）是 Enterprise 功能
 
-- 前置条件（Python 版本、Neo4j 5.x、n10s 插件、`onto-infer` 所需 JVM）
-- `pip install` 命令
-- Neo4j + n10s 配置与 `n10s:Resource.uri` 唯一约束
-- 在 Claude Code / Codex / 其他 MCP 客户端注册该 server
-- 可选：安装 `onto-infer`
+### 安装
 
----
+```bash
+git clone https://github.com/yifanzhao2023/fan-enterprise-ontology-mcp.git
+cd fan-enterprise-ontology-mcp
+python -m venv .venv
+.venv/bin/pip install -e ".[dev]"          # Windows: .venv\Scripts\pip install -e ".[dev]"
+```
 
+### 启动 Neo4j
+
+```bash
+docker compose up -d --wait
+```
+
+起 Neo4j 5.26 Community，`bolt://localhost:7687`（`neo4j` / `password`）。
+**刻意不装 APOC**：guard 本来就拒一切 `apoc.*`，插件不装等于库层也跑不了，多一道防线。
+
+### 生成 schema 投影
+
+```bash
+make projection
+```
+
+`schema.projection.json` 由 `TBox.ttl` + `shapes.ttl` 编译而来。**要一起提交**——过期 CI 会红。
+
+### 载入样例数据
+
+```bash
+make seed
+```
+
+读 `ontology/abox.ttl`，走 MCP 写入工具同一套表示写入器写进 Neo4j。要把样例本体换成你自己的，
+看 [`ontology/README.md`](ontology/README.md)。
+
+### 注册进 coding agent
+
+server 走 MCP stdio。命令是 venv 里的 console script——**用绝对路径**，agent 的环境不会激活你的 venv。
+
+**Claude Code** —— 项目根目录 `.mcp.json`：
+
+```json
+{
+  "mcpServers": {
+    "beomcp": {
+      "command": "/绝对路径/.venv/bin/beomcp",
+      "args": [],
+      "env": {
+        "BEOMCP_ONTOLOGY_DIR": "/绝对路径/ontology",
+        "BEOMCP_NEO4J_URI": "bolt://localhost:7687",
+        "BEOMCP_NEO4J_USER": "reader",
+        "BEOMCP_NEO4J_PASSWORD": "…",
+        "BEOMCP_NEO4J_WRITE_USER": "writer",
+        "BEOMCP_NEO4J_WRITE_PASSWORD": "…"
+      }
+    }
+  }
+}
+```
+
+或 `claude mcp add beomcp -- /绝对路径/.venv/bin/beomcp`。
+
+**Codex** —— `~/.codex/config.toml`：
+
+```toml
+[mcp_servers.beomcp]
+command = "/绝对路径/.venv/bin/beomcp"
+
+[mcp_servers.beomcp.env]
+BEOMCP_ONTOLOGY_DIR = "/绝对路径/ontology"
+BEOMCP_NEO4J_URI = "bolt://localhost:7687"
+BEOMCP_NEO4J_USER = "reader"
+BEOMCP_NEO4J_PASSWORD = "…"
+```
+
+**其它 MCP 客户端** —— stdio 传输，命令 `beomcp`（等价 `python -m beomcp.server`）。
+
+> 查询账号与写入账号相同时 server 拒绝启动。给查询账号只授 `MATCH` 权限，或开发期设
+> `BEOMCP_ALLOW_SHARED_ACCOUNT=1`。
+
+### 验证
+
+```bash
+make demo
+```
+
+起 Neo4j、重生成投影、载入样例 ABox、跑全部能力问题比对预期结果。
 ## 9. 配置
 
 环境变量。不引配置框架。
 
+| 变量 | 默认 | 作用 |
+|---|---|---|
+| `BEOMCP_STORE` | `neo4j` | 存储适配器 |
+| `BEOMCP_NEO4J_URI` | `bolt://localhost:7687` | Neo4j bolt URI |
+| `BEOMCP_NEO4J_USER` | `neo4j` | 只读账号（查询工具） |
+| `BEOMCP_NEO4J_PASSWORD` | *(空)* | |
+| `BEOMCP_NEO4J_WRITE_USER` | *同 `BEOMCP_NEO4J_USER`* | 读写账号（写入工具） |
+| `BEOMCP_NEO4J_WRITE_PASSWORD` | *同 `BEOMCP_NEO4J_PASSWORD`* | |
+| `BEOMCP_ONTOLOGY_DIR` | `ontology/` | TBox、shapes、queries、manifest、投影、ABox |
+| `BEOMCP_QUERY_TIMEOUT_MS` | `10000` | 单查询超时 |
+| `BEOMCP_MAX_ROWS` | `50` | 结果行数上限（同时提前停止读取） |
+| `BEOMCP_MAX_QUERY_LENGTH` | `8192` | 查询字符串长度上限 |
+| `BEOMCP_MAX_BATCH` | `500` | 单批写入条数上限 |
+| `BEOMCP_REDACT_FIELDS` | *(空)* | 读出时打码的字段名，逗号分隔 |
+| `BEOMCP_ALLOW_SHARED_ACCOUNT` | `0` | `1` 允许查询与写入共用一个账号（仅开发） |
 
-| 变量                            | 默认          | 作用                           |
-| ----------------------------- | ----------- | ---------------------------- |
-| `BEOMCP_STORE`                | `neo4j`     | 存储适配器                        |
-| `BEOMCP_NEO4J_URI`            | —           | Neo4j bolt URI               |
-| `BEOMCP_NEO4J_USER`           | —           | 只读账号（查询工具）                   |
-| `BEOMCP_NEO4J_PASSWORD`       | —           |                              |
-| `BEOMCP_NEO4J_WRITE_USER`     | —           | 读写账号（写入工具）                   |
-| `BEOMCP_NEO4J_WRITE_PASSWORD` | —           |                              |
-| `BEOMCP_ONTOLOGY_DIR`         | `ontology/` | TBox、shapes、rules、queries、投影 |
-| `BEOMCP_QUERY_TIMEOUT_MS`     | `10000`     | 单查询超时                        |
-| `BEOMCP_MAX_ROWS`             | `50`        | 结果行数上限                       |
-| `BEOMCP_MAX_QUERY_LENGTH`     | `8192`      | 查询字符串长度上限                    |
-| `BEOMCP_MAX_BATCH`            | —           | 单批写入条数上限                     |
-| `BEOMCP_REDACT_FIELDS`        | —           | 读出时脱敏的字段路径                   |
+**权限分离靠数据库原生账号**，不靠代码分支。server 维两个 driver session，按工具组路由：
+查询工具（1–6、9、10）走只读账号，写入工具（7、8）走读写账号。
 
+两者指向同一账号时 `build_server` 拒绝启动，除非设了 `BEOMCP_ALLOW_SHARED_ACCOUNT=1`。
 
-**权限分离靠数据库原生账号**，不靠代码分支。server 维两个 driver session，按工具组路由。查询工具（1–6、9、10）走只读账号；写入工具（7、8）走读写账号。JVM 两个都没有。
+默认值对应 `docker compose` 那套栈。生产必须显式设置账号变量。
 
 ---
 
 ## 10. Quick Start
 
-> **占位 —— 尚未实现。**
+```bash
+# 1. 起 Neo4j
+docker compose up -d --wait
 
-计划内容：
+# 2. 生成 schema 投影 + 载入样例 ABox
+make seed
 
-1. 启动 Neo4j + n10s（`docker compose up`）
-2. 灌入样例本体与样例 ABox
-3. 跑 `onto-infer`
-4. 跑能力问题测试集（`make demo`）
-5. 接上 Claude Code / Codex，问一个业务问题
-6. 已知样例查询的预期输出
+# 3. 跑全部能力问题比对预期结果
+make demo
+```
+
+然后按[安装](#8-安装)把 agent 接上，问一个业务问题。推荐第一个：
+
+> 名下金额超过 100 万的合同有哪些？
+
+agent 应该先 `search_schema` / `list_queries`，再 `run_query("contracts_over_amount_by_customer", {...})`——而不是直接写裸 Cypher。
+
+不想连 agent、只想看工具面：
+
+```bash
+.venv/bin/python -m beomcp.server      # 起 MCP stdio server
+```
+
+**这是样例域。** `ontology/` 建的是企业合同管理，纯粹为了让栈开箱能跑——换成你自己的本体，
+见 [`ontology/README.md`](ontology/README.md)。
 
 ---
 

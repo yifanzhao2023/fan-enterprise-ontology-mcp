@@ -23,16 +23,23 @@ TOOL_NAMES = (
     "upsert_relations",
 )
 
-_CONTEXT = {
-    "kind": "beomcp-result",
-    "note": "business contract layer, not strict standard JSON-LD",
-    "vocab": "https://example.org/onto#",
-}
+def _context(vocab: str) -> dict[str, Any]:
+    """The @context names the ontology's namespace so the agent knows what the
+    IRIs in the rows mean. It is not a JSON-LD context and is not used to
+    serialise RDF — that happens over .ttl files only."""
+    return {
+        "kind": "beomcp-result",
+        "note": "business contract layer, not strict standard JSON-LD",
+        "vocab": vocab,
+    }
+
+
+_VOCAB = "https://example.org/onto#"
 
 
 def _envelope(rows: Sequence[Mapping[str, Any]], *, truncated: bool) -> dict[str, Any]:
     return {
-        "@context": _CONTEXT,
+        "@context": _context(_VOCAB),
         "rows": list(rows),
         "row_count": len(rows),
         "truncated": truncated,
@@ -94,6 +101,8 @@ def build_server(settings: Settings | None = None, *, principal: str = "agent") 
     store = Neo4jStore(s)
     schema = SchemaCatalog.load(s.ontology_dir)
     catalog = Catalog.load(s.ontology_dir)
+    global _VOCAB
+    _VOCAB = catalog.namespace
     audit = AuditLogger()
     fields = tuple(s.redact_fields)
     mcp = MCPServer("beomcp")
@@ -300,3 +309,7 @@ def _receipt(r) -> dict[str, Any]:
 
 def main() -> None:
     build_server().run()
+
+
+if __name__ == "__main__":
+    main()

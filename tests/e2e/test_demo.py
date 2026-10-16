@@ -5,11 +5,7 @@ import pytest
 from beomcp.catalog import Catalog
 from beomcp.config import Settings
 from beomcp.neo4j_store import Neo4jStore
-from beomcp.ports import Entity, Relation, WriteBatch
-
-TBox = "https://example.org/onto#"
-ID = "https://example.org/id/"
-
+from beomcp.seed import load_abox
 
 @pytest.fixture(scope="module")
 def store():
@@ -21,28 +17,12 @@ def store():
 
 @pytest.fixture(scope="module")
 def seeded(store):
-    """Load the sample ABox. Cleared first so a re-run against a persistent
-    volume still compares against the manifest's sample_result values."""
+    """Load the sample ABox from ontology/abox.ttl — the same file `make seed`
+    writes, so the demo and the suite cannot drift apart. Cleared first so a
+    re-run against a persistent volume still matches the manifest samples."""
     with store._write.session() as session:
         session.run("MATCH (n) DETACH DELETE n").consume()
-    batch = WriteBatch(
-        entities=[
-            Entity(ID + "customerA", (TBox + "Customer",), {"hasName": "客户A"}),
-            Entity(ID + "departmentSales", (TBox + "Department",), {}),
-            Entity(ID + "employeeZhang", (TBox + "Employee",), {}),
-            Entity(ID + "contract001", (TBox + "Contract",),
-                   {"hasAmount": 1200000, "hasStatus": "draft", "archived": False}),
-            Entity(ID + "wo001", (TBox + "WorkOrder",), {}),
-        ],
-        relations=[
-            Relation(ID + "contract001", TBox + "belongsToCustomer", ID + "customerA"),
-            Relation(ID + "departmentSales", TBox + "hasHead", ID + "employeeZhang"),
-            Relation(ID + "employeeZhang", TBox + "worksFor", ID + "departmentSales"),
-            Relation(ID + "wo001", TBox + "belongsToDepartment", ID + "departmentSales"),
-            Relation(ID + "wo001", TBox + "hasOwner", ID + "employeeZhang"),
-        ],
-    )
-    store.upsert(batch)
+    store.upsert(load_abox(Path("ontology/abox.ttl")))
     return True
 
 

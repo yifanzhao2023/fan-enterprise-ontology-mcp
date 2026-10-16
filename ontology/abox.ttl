@@ -1,0 +1,27 @@
+@prefix onto: <https://example.org/onto#> .
+@prefix ex:   <https://example.org/id/> .
+
+# Sample ABox for the enterprise contract management domain.
+# This is example data — replace it with your own, or load your own through
+# the MCP upsert tools.
+
+ex:customerA a onto:Customer ;
+    onto:hasName "客户A" .
+
+ex:departmentSales a onto:Department .
+
+ex:employeeZhang a onto:Employee .
+
+ex:contract001 a onto:Contract ;
+    onto:hasAmount 1200000 ;
+    onto:hasStatus "draft" ;
+    onto:archived false ;
+    onto:belongsToCustomer ex:customerA .
+
+ex:wo001 a onto:WorkOrder ;
+    onto:belongsToDepartment ex:departmentSales ;
+    onto:hasOwner ex:employeeZhang .
+
+ex:departmentSales onto:hasHead ex:employeeZhang .
+
+ex:employeeZhang onto:worksFor ex:departmentSales .
