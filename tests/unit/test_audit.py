@@ -1,4 +1,4 @@
-from beomcp.audit import AuditLogger, digest_params
+from feomcp.audit import AuditLogger, digest_params
 
 
 def test_digest_is_stable_and_opaque():

@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from beomcp.catalog import Catalog
-from beomcp.errors import SchemaNotFound, ValidationFailed
+from feomcp.catalog import Catalog
+from feomcp.errors import SchemaNotFound, ValidationFailed
 
 
 class FakeEngine:

@@ -1,9 +1,9 @@
 ---
-name: beomcp
-description: Use the enterprise ontology MCP server (beomcp) to answer business questions over contracts, customers, work orders and org structure, and to write instance data into it. Triggers when the user asks about 合同/客户/工单/部门/员工 business facts, wants to query or write enterprise ontology data, asks "which contracts…", "who reports to…", or asks to load/validate ontology files. Also triggers on /beomcp.
+name: feomcp
+description: Use the enterprise ontology MCP server (feomcp) to answer business questions over contracts, customers, work orders and org structure, and to write instance data into it. Triggers when the user asks about 合同/客户/工单/部门/员工 business facts, wants to query or write enterprise ontology data, asks "which contracts…", "who reports to…", or asks to load/validate ontology files. Also triggers on /feomcp.
 ---
 
-# Using the beomcp ontology MCP
+# Using the feomcp ontology MCP
 
 This MCP exposes an enterprise ontology as an agent semantic memory layer. It is
 not a document store and not a SQL console — the value is the **schema and the

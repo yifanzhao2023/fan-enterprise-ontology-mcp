@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from beomcp.errors import SchemaNotFound
-from beomcp.schema import SchemaCatalog
+from feomcp.errors import SchemaNotFound
+from feomcp.schema import SchemaCatalog
 
 
 def test_search_finds_class_by_keyword():

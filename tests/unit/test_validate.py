@@ -2,9 +2,9 @@ from pathlib import Path
 
 import pytest
 
-from beomcp.errors import ValidationFailed
-from beomcp.ports import Entity
-from beomcp.validate import require_valid, validate_core
+from feomcp.errors import ValidationFailed
+from feomcp.ports import Entity
+from feomcp.validate import require_valid, validate_core
 
 TBox = "https://example.org/onto#"
 SHAPES = Path("ontology/shapes.ttl")

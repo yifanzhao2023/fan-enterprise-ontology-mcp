@@ -5,9 +5,9 @@ PYTHON ?= $(if $(VENV_PYTHON),$(VENV_PYTHON),python3)
 
 # Defaults matching docker-compose.yml. Override in the environment if your
 # stack uses different credentials.
-export BEOMCP_NEO4J_USER ?= neo4j
-export BEOMCP_NEO4J_PASSWORD ?= password
-export BEOMCP_NEO4J_URI ?= bolt://localhost:7687
+export FEOMCP_NEO4J_USER ?= neo4j
+export FEOMCP_NEO4J_PASSWORD ?= password
+export FEOMCP_NEO4J_URI ?= bolt://localhost:7687
 
 .PHONY: demo test unit integration e2e lint-projection projection seed up down
 
@@ -18,10 +18,10 @@ down:
 	docker compose down -v
 
 projection:
-	$(PYTHON) -m beomcp.cli project
+	$(PYTHON) -m feomcp.cli project
 
 seed: projection
-	$(PYTHON) -m beomcp.cli seed --abox ontology/abox.ttl
+	$(PYTHON) -m feomcp.cli seed --abox ontology/abox.ttl
 
 lint-projection: projection
 	git diff --exit-code -- ontology/schema.projection.json || \

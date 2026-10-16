@@ -3,7 +3,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from beomcp.projection import build_projection
+from feomcp.projection import build_projection
 
 
 def test_projection_has_six_classes_and_nine_properties():
@@ -41,7 +41,7 @@ def test_projection_is_byte_stable(tmp_path):
 def test_onto_project_writes_file(tmp_path):
     out = tmp_path / "schema.projection.json"
     subprocess.run(
-        [sys.executable, "-m", "beomcp.cli", "project",
+        [sys.executable, "-m", "feomcp.cli", "project",
          "--tbox", "ontology/TBox.ttl", "--shapes", "ontology/shapes.ttl",
          "--out", str(out)],
         check=True,

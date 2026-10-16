@@ -2,10 +2,10 @@ from pathlib import Path
 
 import pytest
 
-from beomcp.catalog import Catalog
-from beomcp.config import Settings
-from beomcp.neo4j_store import Neo4jStore
-from beomcp.seed import load_abox
+from feomcp.catalog import Catalog
+from feomcp.config import Settings
+from feomcp.neo4j_store import Neo4jStore
+from feomcp.seed import load_abox
 
 @pytest.fixture(scope="module")
 def store():
@@ -39,7 +39,7 @@ def test_projection_gate_is_clean():
     import sys
 
     before = Path("ontology/schema.projection.json").read_text(encoding="utf-8")
-    subprocess.run([sys.executable, "-m", "beomcp.cli", "project"], check=True)
+    subprocess.run([sys.executable, "-m", "feomcp.cli", "project"], check=True)
     after = Path("ontology/schema.projection.json").read_text(encoding="utf-8")
     assert before == after, "schema.projection.json is out of date — run `onto project` and commit it"
     assert json.loads(after)["version"] == 1

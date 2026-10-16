@@ -6,7 +6,7 @@ from mcp.server.mcpserver import MCPServer
 from .audit import AuditLogger
 from .catalog import Catalog
 from .config import Settings
-from .errors import BackendUnavailable, BeomcpError, WriteRejected
+from .errors import BackendUnavailable, FeomcpError, WriteRejected
 from .neo4j_store import Neo4jStore
 from .playbook import QUERY_PLAYBOOK, WRITE_PLAYBOOK
 from .ports import Entity, Relation, WriteBatch
@@ -29,7 +29,7 @@ def _context(vocab: str) -> dict[str, Any]:
     IRIs in the rows mean. It is not a JSON-LD context and is not used to
     serialise RDF — that happens over .ttl files only."""
     return {
-        "kind": "beomcp-result",
+        "kind": "feomcp-result",
         "note": "business contract layer, not strict standard JSON-LD",
         "vocab": vocab,
     }
@@ -67,7 +67,7 @@ def _call(
 
     try:
         result = fn()
-    except BeomcpError as exc:
+    except FeomcpError as exc:
         finish(0, False)
         return exc.to_payload()
     except Exception:  # noqa: BLE001 - a raw traceback must never reach the agent
@@ -97,7 +97,7 @@ def build_server(settings: Settings | None = None, *, principal: str = "agent") 
         raise ValueError(
             "query and write accounts are the same account; query tools must use a "
             "read-only account. Grant MATCH-only to a separate reader, or set "
-            "BEOMCP_ALLOW_SHARED_ACCOUNT=1 to accept this (development only)."
+            "FEOMCP_ALLOW_SHARED_ACCOUNT=1 to accept this (development only)."
         )
     store = Neo4jStore(s)
     schema = SchemaCatalog.load(s.ontology_dir)
@@ -106,7 +106,7 @@ def build_server(settings: Settings | None = None, *, principal: str = "agent") 
     _VOCAB = catalog.namespace
     audit = AuditLogger()
     fields = tuple(s.redact_fields)
-    mcp = MCPServer("beomcp")
+    mcp = MCPServer("feomcp")
 
     def call(tool: str, params: Mapping[str, Any], fn: Callable[[], Any]) -> Any:
         return _call(tool=tool, params=params, principal=principal,

@@ -165,7 +165,7 @@ LIMIT 50
 **机器生成，不要手改。**
 
 ```bash
-make projection        # 或 python -m beomcp.cli project
+make projection        # 或 python -m feomcp.cli project
 ```
 
 CI 跑 `make lint-projection`：重新生成后 `git diff --exit-code`，不一致即失败。
@@ -254,4 +254,4 @@ manifest 的 `name` 和文件名对不上。
 正常——它就是拦这个的。跑 `make projection`，把 `schema.projection.json` 一起提交。
 
 **`build_server` 报 "query and write accounts are the same account"**
-读写账号相同，安全模型不成立。给查询账号一个只有 `MATCH` 权限的账户，或开发期设 `BEOMCP_ALLOW_SHARED_ACCOUNT=1`。
+读写账号相同，安全模型不成立。给查询账号一个只有 `MATCH` 权限的账户，或开发期设 `FEOMCP_ALLOW_SHARED_ACCOUNT=1`。

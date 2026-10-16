@@ -76,7 +76,7 @@ instance and its relation in the same call.
 All-or-nothing. Nothing partial is ever committed, so a rejected batch leaves the graph
 exactly as it was.
 
-A batch larger than `BEOMCP_MAX_BATCH` is refused with a hint to split it. Split it —
+A batch larger than `FEOMCP_MAX_BATCH` is refused with a hint to split it. Split it —
 chunked writes are deliberately not offered, because they would break atomicity.
 
 ## Identifiers are agent input

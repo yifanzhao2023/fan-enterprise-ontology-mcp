@@ -3,7 +3,7 @@ import json
 import logging
 from typing import Any, Callable, Mapping
 
-_LOG = logging.getLogger("beomcp.audit")
+_LOG = logging.getLogger("feomcp.audit")
 
 Sink = Callable[[Mapping[str, Any]], None]
 

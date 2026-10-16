@@ -10,7 +10,7 @@ from neo4j import GraphDatabase
 from rdflib import Graph, Literal as RdfLiteral
 
 from .config import Settings
-from .errors import BackendUnavailable, BeomcpError, QueryLimitExceeded, QuerySyntaxError, WriteRejected
+from .errors import BackendUnavailable, FeomcpError, QueryLimitExceeded, QuerySyntaxError, WriteRejected
 from .guard import check_cypher
 from .ports import Entity, Relation, WriteBatch, WriteReceipt
 from .validate import require_valid
@@ -68,7 +68,7 @@ class Neo4jStore:
                 retryable=True,
                 details={"rule": "timeout", "timeout_ms": self._settings.query_timeout_ms},
             )
-        except BeomcpError:
+        except FeomcpError:
             raise
         except Exception as exc:  # noqa: BLE001 - map driver errors to our codes
             raise _map_driver_error(exc)
@@ -116,7 +116,7 @@ class Neo4jStore:
                         _write_relation(tx, rel, inferred=False)
 
                 session.execute_write(work)
-        except BeomcpError:
+        except FeomcpError:
             raise
         except Exception as exc:  # noqa: BLE001 - same mapping as submit
             raise _map_driver_error(exc)
@@ -222,7 +222,7 @@ def _strip_derived(tx, labels: Sequence[str], props: Sequence[str]) -> None:
     tx.run("MATCH (n:ConstraintViolation) DETACH DELETE n")
 
 
-def _map_driver_error(exc: Exception) -> BeomcpError:
+def _map_driver_error(exc: Exception) -> FeomcpError:
     text = _scrub(str(exc))
     head = text.split("\n")[0][:200]
     if "SyntaxError" in text or "InvalidSyntax" in text:

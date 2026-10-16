@@ -1,6 +1,6 @@
 import inspect
 
-from beomcp import server
+from feomcp import server
 
 
 def test_tool_registry_has_eight_tools():
@@ -59,12 +59,12 @@ def test_unexpected_exception_becomes_opaque_payload():
 def test_build_server_refuses_a_shared_read_write_account():
     import pytest
 
-    from beomcp.config import Settings
+    from feomcp.config import Settings
 
     s = Settings.from_env({
-        "BEOMCP_NEO4J_URI": "bolt://localhost:7687",
-        "BEOMCP_NEO4J_USER": "neo4j",
-        "BEOMCP_NEO4J_PASSWORD": "x",
+        "FEOMCP_NEO4J_URI": "bolt://localhost:7687",
+        "FEOMCP_NEO4J_USER": "neo4j",
+        "FEOMCP_NEO4J_PASSWORD": "x",
     })
     assert s.neo4j_user == s.neo4j_write_user
     with pytest.raises(ValueError, match="read-only"):
@@ -72,14 +72,14 @@ def test_build_server_refuses_a_shared_read_write_account():
 
 
 def test_build_server_accepts_separate_accounts():
-    from beomcp.config import Settings
+    from feomcp.config import Settings
 
     s = Settings.from_env({
-        "BEOMCP_NEO4J_URI": "bolt://localhost:7687",
-        "BEOMCP_NEO4J_USER": "reader",
-        "BEOMCP_NEO4J_PASSWORD": "x",
-        "BEOMCP_NEO4J_WRITE_USER": "writer",
-        "BEOMCP_NEO4J_WRITE_PASSWORD": "y",
+        "FEOMCP_NEO4J_URI": "bolt://localhost:7687",
+        "FEOMCP_NEO4J_USER": "reader",
+        "FEOMCP_NEO4J_PASSWORD": "x",
+        "FEOMCP_NEO4J_WRITE_USER": "writer",
+        "FEOMCP_NEO4J_WRITE_PASSWORD": "y",
     })
     # constructs without raising; do not run it (no database here)
     assert s.neo4j_user != s.neo4j_write_user
@@ -90,14 +90,14 @@ def test_all_eight_tools_register_and_both_write_tools_take_both_halves():
     both the instance and its relation cannot create one at all."""
     import asyncio
 
-    from beomcp.config import Settings
+    from feomcp.config import Settings
 
     s = Settings.from_env({
-        "BEOMCP_NEO4J_URI": "bolt://localhost:7687",
-        "BEOMCP_NEO4J_USER": "reader",
-        "BEOMCP_NEO4J_PASSWORD": "x",
-        "BEOMCP_NEO4J_WRITE_USER": "writer",
-        "BEOMCP_NEO4J_WRITE_PASSWORD": "y",
+        "FEOMCP_NEO4J_URI": "bolt://localhost:7687",
+        "FEOMCP_NEO4J_USER": "reader",
+        "FEOMCP_NEO4J_PASSWORD": "x",
+        "FEOMCP_NEO4J_WRITE_USER": "writer",
+        "FEOMCP_NEO4J_WRITE_PASSWORD": "y",
     })
     # drivers are lazy — building the server needs no live database
     mcp = server.build_server(s)
@@ -112,7 +112,7 @@ def test_all_eight_tools_register_and_both_write_tools_take_both_halves():
 def test_types_supplied_as_a_string_is_refused():
     import pytest
 
-    from beomcp.errors import WriteRejected
+    from feomcp.errors import WriteRejected
 
     with pytest.raises(WriteRejected) as exc:
         server._coerce_entities([{"iri": "https://x/i", "types": "Contract"}])
@@ -122,7 +122,7 @@ def test_types_supplied_as_a_string_is_refused():
 def test_missing_iri_is_refused_with_field_detail():
     import pytest
 
-    from beomcp.errors import WriteRejected
+    from feomcp.errors import WriteRejected
 
     with pytest.raises(WriteRejected) as exc:
         server._coerce_entities([{"types": ["Contract"]}])
@@ -132,14 +132,14 @@ def test_missing_iri_is_refused_with_field_detail():
 def _offline_server():
     """Build the server against a non-existent database: drivers are lazy, and
     resources/prompts never touch one."""
-    from beomcp.config import Settings
+    from feomcp.config import Settings
 
     s = Settings.from_env({
-        "BEOMCP_NEO4J_URI": "bolt://localhost:7687",
-        "BEOMCP_NEO4J_USER": "reader",
-        "BEOMCP_NEO4J_PASSWORD": "x",
-        "BEOMCP_NEO4J_WRITE_USER": "writer",
-        "BEOMCP_NEO4J_WRITE_PASSWORD": "y",
+        "FEOMCP_NEO4J_URI": "bolt://localhost:7687",
+        "FEOMCP_NEO4J_USER": "reader",
+        "FEOMCP_NEO4J_PASSWORD": "x",
+        "FEOMCP_NEO4J_WRITE_USER": "writer",
+        "FEOMCP_NEO4J_WRITE_PASSWORD": "y",
     })
     return server.build_server(s)
 

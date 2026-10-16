@@ -1,7 +1,7 @@
 from typing import Any
 
 
-class BeomcpError(Exception):
+class FeomcpError(Exception):
     code = "BACKEND_UNAVAILABLE"
 
     def __init__(
@@ -28,29 +28,29 @@ class BeomcpError(Exception):
         }
 
 
-class SchemaNotFound(BeomcpError):
+class SchemaNotFound(FeomcpError):
     code = "SCHEMA_NOT_FOUND"
 
 
-class QuerySyntaxError(BeomcpError):
+class QuerySyntaxError(FeomcpError):
     code = "QUERY_SYNTAX"
 
 
-class QueryRejected(BeomcpError):
+class QueryRejected(FeomcpError):
     code = "QUERY_REJECTED"
 
 
-class QueryLimitExceeded(BeomcpError):
+class QueryLimitExceeded(FeomcpError):
     code = "QUERY_LIMIT"
 
 
-class ValidationFailed(BeomcpError):
+class ValidationFailed(FeomcpError):
     code = "VALIDATION_FAILED"
 
 
-class WriteRejected(BeomcpError):
+class WriteRejected(FeomcpError):
     code = "WRITE_REJECTED"
 
 
-class BackendUnavailable(BeomcpError):
+class BackendUnavailable(FeomcpError):
     code = "BACKEND_UNAVAILABLE"

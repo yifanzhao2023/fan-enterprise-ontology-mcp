@@ -1,7 +1,7 @@
 import pytest
 
-from beomcp.errors import QueryLimitExceeded, QueryRejected
-from beomcp.guard import check_cypher
+from feomcp.errors import QueryLimitExceeded, QueryRejected
+from feomcp.guard import check_cypher
 
 
 def test_plain_match_is_allowed():

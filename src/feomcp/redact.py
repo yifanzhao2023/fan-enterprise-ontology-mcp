@@ -9,7 +9,7 @@ def redact_rows(
     """Mask configured keys at read time, at every depth.
 
     Storage keeps complete data and writes are never redacted — data integrity
-    wins. But a caller who sets BEOMCP_REDACT_FIELDS=hasAmount expects the value
+    wins. But a caller who sets FEOMCP_REDACT_FIELDS=hasAmount expects the value
     masked wherever it appears: as a column, inside a returned node, or in a
     nested list.
     """

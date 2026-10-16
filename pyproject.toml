@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "beomcp"
+name = "feomcp"
 version = "0.1.0"
 description = "MCP server exposing an enterprise ontology as an agent semantic memory layer"
 requires-python = ">=3.12"
@@ -19,11 +19,11 @@ dependencies = [
 dev = ["pytest>=8.3.0", "testcontainers[neo4j]>=4.8.0"]
 
 [project.scripts]
-beomcp = "beomcp.server:main"
-onto = "beomcp.cli:main"
+feomcp = "feomcp.server:main"
+onto = "feomcp.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/beomcp"]
+packages = ["src/feomcp"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

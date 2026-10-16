@@ -1,4 +1,4 @@
-from beomcp.playbook import QUERY_PLAYBOOK, WRITE_PLAYBOOK
+from feomcp.playbook import QUERY_PLAYBOOK, WRITE_PLAYBOOK
 
 
 def test_query_playbook_states_the_order_of_operations():
@@ -38,7 +38,7 @@ def test_write_playbook_requires_relations_to_be_co_supplied():
 
 def test_write_playbook_states_batch_atomicity():
     assert "atomic" in WRITE_PLAYBOOK.lower()
-    assert "BEOMCP_MAX_BATCH" in WRITE_PLAYBOOK
+    assert "FEOMCP_MAX_BATCH" in WRITE_PLAYBOOK
 
 
 def test_write_playbook_limits_write_time_validation_to_core():

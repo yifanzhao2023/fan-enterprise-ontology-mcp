@@ -1,4 +1,4 @@
-from beomcp.ports import Entity, Relation, WriteBatch, WriteReceipt
+from feomcp.ports import Entity, Relation, WriteBatch, WriteReceipt
 
 
 def test_batch_size_counts_entities_and_relations():

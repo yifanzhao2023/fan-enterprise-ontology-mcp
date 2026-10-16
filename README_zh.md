@@ -1,4 +1,4 @@
-# basic-enterprise-ontology-mcp
+# fan-enterprise-ontology-mcp
 
 **让企业本体更简单** · Making enterprise ontology simpler.
 
@@ -316,11 +316,11 @@ ontology://schema     完整投影（大，仅人工查阅，永不进 prompt）
 
 **知识落在 MCP resource 与 prompt**（至少 `ontology://playbook`）。skill 只是薄壳——**不要在 skill 里复述 playbook**，否则两边必然漂移。否则 Codex 拿到一堆裸工具，没人告诉它「先 `search_schema`，再 `list_queries`，最后才 `query_raw`」。
 
-skill（`skills/beomcp/SKILL.md`）承载触发条件、操作顺序，以及 Claude Code 特有、不可跨客户端的那些习惯。安装：
+skill（`skills/feomcp/SKILL.md`）承载触发条件、操作顺序，以及 Claude Code 特有、不可跨客户端的那些习惯。安装：
 
 ```bash
-mkdir -p .claude/skills && cp -r skills/beomcp .claude/skills/   # 本项目
-cp -r skills/beomcp ~/.claude/skills/                            # 所有项目
+mkdir -p .claude/skills && cp -r skills/feomcp .claude/skills/   # 本项目
+cp -r skills/feomcp ~/.claude/skills/                            # 所有项目
 ```
 
 ---
@@ -378,41 +378,41 @@ server 走 MCP stdio。命令是 venv 里的 console script——**用绝对路�
 ```json
 {
   "mcpServers": {
-    "beomcp": {
-      "command": "/绝对路径/.venv/bin/beomcp",
+    "feomcp": {
+      "command": "/绝对路径/.venv/bin/feomcp",
       "args": [],
       "env": {
-        "BEOMCP_ONTOLOGY_DIR": "/绝对路径/ontology",
-        "BEOMCP_NEO4J_URI": "bolt://localhost:7687",
-        "BEOMCP_NEO4J_USER": "reader",
-        "BEOMCP_NEO4J_PASSWORD": "…",
-        "BEOMCP_NEO4J_WRITE_USER": "writer",
-        "BEOMCP_NEO4J_WRITE_PASSWORD": "…"
+        "FEOMCP_ONTOLOGY_DIR": "/绝对路径/ontology",
+        "FEOMCP_NEO4J_URI": "bolt://localhost:7687",
+        "FEOMCP_NEO4J_USER": "reader",
+        "FEOMCP_NEO4J_PASSWORD": "…",
+        "FEOMCP_NEO4J_WRITE_USER": "writer",
+        "FEOMCP_NEO4J_WRITE_PASSWORD": "…"
       }
     }
   }
 }
 ```
 
-或 `claude mcp add beomcp -- /绝对路径/.venv/bin/beomcp`。
+或 `claude mcp add feomcp -- /绝对路径/.venv/bin/feomcp`。
 
 **Codex** —— `~/.codex/config.toml`：
 
 ```toml
-[mcp_servers.beomcp]
-command = "/绝对路径/.venv/bin/beomcp"
+[mcp_servers.feomcp]
+command = "/绝对路径/.venv/bin/feomcp"
 
-[mcp_servers.beomcp.env]
-BEOMCP_ONTOLOGY_DIR = "/绝对路径/ontology"
-BEOMCP_NEO4J_URI = "bolt://localhost:7687"
-BEOMCP_NEO4J_USER = "reader"
-BEOMCP_NEO4J_PASSWORD = "…"
+[mcp_servers.feomcp.env]
+FEOMCP_ONTOLOGY_DIR = "/绝对路径/ontology"
+FEOMCP_NEO4J_URI = "bolt://localhost:7687"
+FEOMCP_NEO4J_USER = "reader"
+FEOMCP_NEO4J_PASSWORD = "…"
 ```
 
-**其它 MCP 客户端** —— stdio 传输，命令 `beomcp`（等价 `python -m beomcp.server`）。
+**其它 MCP 客户端** —— stdio 传输，命令 `feomcp`（等价 `python -m feomcp.server`）。
 
 > 查询账号与写入账号相同时 server 拒绝启动。给查询账号只授 `MATCH` 权限，或开发期设
-> `BEOMCP_ALLOW_SHARED_ACCOUNT=1`。
+> `FEOMCP_ALLOW_SHARED_ACCOUNT=1`。
 
 ### 验证
 
@@ -427,24 +427,24 @@ make demo
 
 | 变量 | 默认 | 作用 |
 |---|---|---|
-| `BEOMCP_STORE` | `neo4j` | 存储适配器 |
-| `BEOMCP_NEO4J_URI` | `bolt://localhost:7687` | Neo4j bolt URI |
-| `BEOMCP_NEO4J_USER` | `neo4j` | 只读账号（查询工具） |
-| `BEOMCP_NEO4J_PASSWORD` | *(空)* | |
-| `BEOMCP_NEO4J_WRITE_USER` | *同 `BEOMCP_NEO4J_USER`* | 读写账号（写入工具） |
-| `BEOMCP_NEO4J_WRITE_PASSWORD` | *同 `BEOMCP_NEO4J_PASSWORD`* | |
-| `BEOMCP_ONTOLOGY_DIR` | `ontology/` | TBox、shapes、queries、manifest、投影、ABox |
-| `BEOMCP_QUERY_TIMEOUT_MS` | `10000` | 单查询超时 |
-| `BEOMCP_MAX_ROWS` | `50` | 结果行数上限（同时提前停止读取） |
-| `BEOMCP_MAX_QUERY_LENGTH` | `8192` | 查询字符串长度上限 |
-| `BEOMCP_MAX_BATCH` | `500` | 单批写入条数上限 |
-| `BEOMCP_REDACT_FIELDS` | *(空)* | 读出时打码的字段名，逗号分隔 |
-| `BEOMCP_ALLOW_SHARED_ACCOUNT` | `0` | `1` 允许查询与写入共用一个账号（仅开发） |
+| `FEOMCP_STORE` | `neo4j` | 存储适配器 |
+| `FEOMCP_NEO4J_URI` | `bolt://localhost:7687` | Neo4j bolt URI |
+| `FEOMCP_NEO4J_USER` | `neo4j` | 只读账号（查询工具） |
+| `FEOMCP_NEO4J_PASSWORD` | *(空)* | |
+| `FEOMCP_NEO4J_WRITE_USER` | *同 `FEOMCP_NEO4J_USER`* | 读写账号（写入工具） |
+| `FEOMCP_NEO4J_WRITE_PASSWORD` | *同 `FEOMCP_NEO4J_PASSWORD`* | |
+| `FEOMCP_ONTOLOGY_DIR` | `ontology/` | TBox、shapes、queries、manifest、投影、ABox |
+| `FEOMCP_QUERY_TIMEOUT_MS` | `10000` | 单查询超时 |
+| `FEOMCP_MAX_ROWS` | `50` | 结果行数上限（同时提前停止读取） |
+| `FEOMCP_MAX_QUERY_LENGTH` | `8192` | 查询字符串长度上限 |
+| `FEOMCP_MAX_BATCH` | `500` | 单批写入条数上限 |
+| `FEOMCP_REDACT_FIELDS` | *(空)* | 读出时打码的字段名，逗号分隔 |
+| `FEOMCP_ALLOW_SHARED_ACCOUNT` | `0` | `1` 允许查询与写入共用一个账号（仅开发） |
 
 **权限分离靠数据库原生账号**，不靠代码分支。server 维两个 driver session，按工具组路由：
 查询工具（1–6、9、10）走只读账号，写入工具（7、8）走读写账号。
 
-两者指向同一账号时 `build_server` 拒绝启动，除非设了 `BEOMCP_ALLOW_SHARED_ACCOUNT=1`。
+两者指向同一账号时 `build_server` 拒绝启动，除非设了 `FEOMCP_ALLOW_SHARED_ACCOUNT=1`。
 
 默认值对应 `docker compose` 那套栈。生产必须显式设置账号变量。
 
@@ -472,7 +472,7 @@ agent 应该先 `search_schema` / `list_queries`，再 `run_query("contracts_ove
 不想连 agent、只想看工具面：
 
 ```bash
-.venv/bin/python -m beomcp.server      # 起 MCP stdio server
+.venv/bin/python -m feomcp.server      # 起 MCP stdio server
 ```
 
 **这是样例域。** `ontology/` 建的是企业合同管理，纯粹为了让栈开箱能跑——换成你自己的本体，
@@ -487,7 +487,7 @@ agent 应该先 `search_schema` / `list_queries`，再 `run_query("contracts_ove
 3. **白名单默认全拒**，且清单接近为空：只放内建只读函数。schema 内省走 `get_schema()`，没有动机把白名单放开。日后要加任何过程，进配置里的显式清单，默认关闭。
 4. **资源上限** —— 查询超时、行数上限、查询长度上限、写入批次上限。
 5. **审计日志** —— `tool` / 参数摘要 / `principal`（调用方标识：Agent 会话 ID 或服务账号）/ `timestamp` / `duration` / `row_count` / `ok`。**不记完整结果**。
-6. **读出时动态脱敏** —— `BEOMCP_REDACT_FIELDS` 在查询返回时打码。存储层保留完整数据，写入不脱敏。脱敏覆盖违规详情（`list_violations` 的 message 常嵌字段值）。v1 是全局配置，不做按 principal 差异化。
+6. **读出时动态脱敏** —— `FEOMCP_REDACT_FIELDS` 在查询返回时打码。存储层保留完整数据，写入不脱敏。脱敏覆盖违规详情（`list_violations` 的 message 常嵌字段值）。v1 是全局配置，不做按 principal 差异化。
    ```
     # ponytail: 只做字段脱敏 + 账号分离 + 审计；三元组级 RBAC/ABAC
     # 待合规需求明确后再做

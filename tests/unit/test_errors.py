@@ -1,6 +1,6 @@
 import pytest
 
-from beomcp.errors import (
+from feomcp.errors import (
     BackendUnavailable,
     QueryLimitExceeded,
     QueryRejected,

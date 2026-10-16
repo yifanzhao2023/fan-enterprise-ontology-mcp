@@ -1,10 +1,10 @@
 import pytest
 from testcontainers.community.neo4j import Neo4jContainer
 
-from beomcp.config import Settings
-from beomcp.errors import QueryRejected, WriteRejected
-from beomcp.neo4j_store import Neo4jStore
-from beomcp.ports import Entity, Relation, WriteBatch
+from feomcp.config import Settings
+from feomcp.errors import QueryRejected, WriteRejected
+from feomcp.neo4j_store import Neo4jStore
+from feomcp.ports import Entity, Relation, WriteBatch
 
 TBox = "https://example.org/onto#"
 
@@ -20,10 +20,10 @@ def store():
         container.start()
         uri = container.get_connection_url()
         settings = Settings.from_env({
-            "BEOMCP_NEO4J_URI": uri,
-            "BEOMCP_NEO4J_USER": "neo4j",
-            "BEOMCP_NEO4J_PASSWORD": "test-password-123",
-            "BEOMCP_MAX_BATCH": "100",
+            "FEOMCP_NEO4J_URI": uri,
+            "FEOMCP_NEO4J_USER": "neo4j",
+            "FEOMCP_NEO4J_PASSWORD": "test-password-123",
+            "FEOMCP_MAX_BATCH": "100",
         })
         s = Neo4jStore(settings)
         yield s
@@ -128,7 +128,7 @@ def test_replace_derived_writes_singleton_job_metadata(store, tmp_path):
 
 def test_agent_supplied_property_key_rejects_identifier_injection(store):
     """Property keys arrive from the agent and land in a Cypher identifier slot."""
-    from beomcp.errors import WriteRejected
+    from feomcp.errors import WriteRejected
 
     batch = WriteBatch(entities=[
         Entity(
@@ -143,7 +143,7 @@ def test_agent_supplied_property_key_rejects_identifier_injection(store):
 
 
 def test_agent_supplied_type_name_rejects_identifier_injection(store):
-    from beomcp.errors import WriteRejected
+    from feomcp.errors import WriteRejected
 
     batch = WriteBatch(entities=[
         Entity(iri="https://example.org/id/evil2", types=(TBox + "Customer` DETACH DELETE n",), properties={}),
@@ -201,16 +201,16 @@ def test_read_only_identity_cannot_write_at_database_level(store):
 
     with store._write.session() as s:
         # Neo4j 5.x rejects IF NOT EXISTS on CREATE ROLE / CREATE USER.
-        s.run("CREATE ROLE beomcp_reader").consume()
-        s.run("GRANT ACCESS ON DATABASE * TO beomcp_reader").consume()
-        s.run("GRANT MATCH {*} ON GRAPH * TO beomcp_reader").consume()
+        s.run("CREATE ROLE feomcp_reader").consume()
+        s.run("GRANT ACCESS ON DATABASE * TO feomcp_reader").consume()
+        s.run("GRANT MATCH {*} ON GRAPH * TO feomcp_reader").consume()
         s.run(
-            "CREATE USER beomcp_reader SET PASSWORD 'read-only-pw' CHANGE NOT REQUIRED"
+            "CREATE USER feomcp_reader SET PASSWORD 'read-only-pw' CHANGE NOT REQUIRED"
         ).consume()
-        s.run("GRANT ROLE beomcp_reader TO beomcp_reader").consume()
+        s.run("GRANT ROLE feomcp_reader TO feomcp_reader").consume()
 
     driver = GraphDatabase.driver(
-        store._settings.neo4j_uri, auth=("beomcp_reader", "read-only-pw")
+        store._settings.neo4j_uri, auth=("feomcp_reader", "read-only-pw")
     )
     try:
         with driver.session() as s:
@@ -223,7 +223,7 @@ def test_read_only_identity_cannot_write_at_database_level(store):
 
 
 def test_driver_errors_are_mapped_without_leaking_internals(store):
-    from beomcp.errors import QuerySyntaxError
+    from feomcp.errors import QuerySyntaxError
 
     with pytest.raises(QuerySyntaxError) as exc:
         store.submit("MATCH (n RETURN n", {})
@@ -237,7 +237,7 @@ def test_backend_failure_maps_to_opaque_backend_unavailable(store):
     cannot be used to force this path — a rejected connection can.)"""
     from neo4j import GraphDatabase
 
-    from beomcp.errors import BackendUnavailable
+    from feomcp.errors import BackendUnavailable
 
     saved = store._read
     bad = GraphDatabase.driver(

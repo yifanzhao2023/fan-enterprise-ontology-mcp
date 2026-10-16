@@ -1,4 +1,4 @@
-# basic-enterprise-ontology-mcp
+# fan-enterprise-ontology-mcp
 
 **Making enterprise ontology simpler.** · 让企业本体更简单
 
@@ -322,12 +322,12 @@ A skill is a thin wrapper — it must not restate the playbook, or the two will 
 Otherwise Codex gets bare tools and nothing tells it "call `search_schema` first,
 then `list_queries`, and only then `query_raw`".
 
-The skill (`skills/beomcp/SKILL.md`) carries the trigger conditions, the order of
+The skill (`skills/feomcp/SKILL.md`) carries the trigger conditions, the order of
 operations and the Claude Code habits that are not client-agnostic. Install it:
 
 ```bash
-mkdir -p .claude/skills && cp -r skills/beomcp .claude/skills/   # this project
-cp -r skills/beomcp ~/.claude/skills/                            # every project
+mkdir -p .claude/skills && cp -r skills/feomcp .claude/skills/   # this project
+cp -r skills/feomcp ~/.claude/skills/                            # every project
 ```
 
 ---
@@ -390,43 +390,43 @@ The server speaks MCP over stdio. The command is the console script inside your 
 ```json
 {
   "mcpServers": {
-    "beomcp": {
-      "command": "/abs/path/to/.venv/bin/beomcp",
+    "feomcp": {
+      "command": "/abs/path/to/.venv/bin/feomcp",
       "args": [],
       "env": {
-        "BEOMCP_ONTOLOGY_DIR": "/abs/path/to/ontology",
-        "BEOMCP_NEO4J_URI": "bolt://localhost:7687",
-        "BEOMCP_NEO4J_USER": "reader",
-        "BEOMCP_NEO4J_PASSWORD": "…",
-        "BEOMCP_NEO4J_WRITE_USER": "writer",
-        "BEOMCP_NEO4J_WRITE_PASSWORD": "…"
+        "FEOMCP_ONTOLOGY_DIR": "/abs/path/to/ontology",
+        "FEOMCP_NEO4J_URI": "bolt://localhost:7687",
+        "FEOMCP_NEO4J_USER": "reader",
+        "FEOMCP_NEO4J_PASSWORD": "…",
+        "FEOMCP_NEO4J_WRITE_USER": "writer",
+        "FEOMCP_NEO4J_WRITE_PASSWORD": "…"
       }
     }
   }
 }
 ```
 
-or `claude mcp add beomcp -- /abs/path/to/.venv/bin/beomcp`.
+or `claude mcp add feomcp -- /abs/path/to/.venv/bin/feomcp`.
 
 **Codex** — `~/.codex/config.toml`:
 
 ```toml
-[mcp_servers.beomcp]
-command = "/abs/path/to/.venv/bin/beomcp"
+[mcp_servers.feomcp]
+command = "/abs/path/to/.venv/bin/feomcp"
 
-[mcp_servers.beomcp.env]
-BEOMCP_ONTOLOGY_DIR = "/abs/path/to/ontology"
-BEOMCP_NEO4J_URI = "bolt://localhost:7687"
-BEOMCP_NEO4J_USER = "reader"
-BEOMCP_NEO4J_PASSWORD = "…"
+[mcp_servers.feomcp.env]
+FEOMCP_ONTOLOGY_DIR = "/abs/path/to/ontology"
+FEOMCP_NEO4J_URI = "bolt://localhost:7687"
+FEOMCP_NEO4J_USER = "reader"
+FEOMCP_NEO4J_PASSWORD = "…"
 ```
 
-**Any other MCP client** — stdio transport, command `beomcp` (equivalently
-`python -m beomcp.server`).
+**Any other MCP client** — stdio transport, command `feomcp` (equivalently
+`python -m feomcp.server`).
 
 > The server refuses to start when the query and write accounts are the same account.
 > Give the query account `MATCH`-only privileges, or set
-> `BEOMCP_ALLOW_SHARED_ACCOUNT=1` for development.
+> `FEOMCP_ALLOW_SHARED_ACCOUNT=1` for development.
 
 ### Verify
 
@@ -442,26 +442,26 @@ Environment variables. No config framework.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `BEOMCP_STORE` | `neo4j` | Storage adapter |
-| `BEOMCP_NEO4J_URI` | `bolt://localhost:7687` | Neo4j bolt URI |
-| `BEOMCP_NEO4J_USER` | `neo4j` | Read-only account (query tools) |
-| `BEOMCP_NEO4J_PASSWORD` | *(empty)* | |
-| `BEOMCP_NEO4J_WRITE_USER` | *same as `BEOMCP_NEO4J_USER`* | Read-write account (write tools) |
-| `BEOMCP_NEO4J_WRITE_PASSWORD` | *same as `BEOMCP_NEO4J_PASSWORD`* | |
-| `BEOMCP_ONTOLOGY_DIR` | `ontology/` | TBox, shapes, queries, manifest, projection, ABox |
-| `BEOMCP_QUERY_TIMEOUT_MS` | `10000` | Per-query timeout |
-| `BEOMCP_MAX_ROWS` | `50` | Result row cap (also stops reading early) |
-| `BEOMCP_MAX_QUERY_LENGTH` | `8192` | Query string length cap |
-| `BEOMCP_MAX_BATCH` | `500` | Single write batch cap |
-| `BEOMCP_REDACT_FIELDS` | *(empty)* | Comma-separated field names masked at read time |
-| `BEOMCP_ALLOW_SHARED_ACCOUNT` | `0` | `1` permits query and write to share one account (development only) |
+| `FEOMCP_STORE` | `neo4j` | Storage adapter |
+| `FEOMCP_NEO4J_URI` | `bolt://localhost:7687` | Neo4j bolt URI |
+| `FEOMCP_NEO4J_USER` | `neo4j` | Read-only account (query tools) |
+| `FEOMCP_NEO4J_PASSWORD` | *(empty)* | |
+| `FEOMCP_NEO4J_WRITE_USER` | *same as `FEOMCP_NEO4J_USER`* | Read-write account (write tools) |
+| `FEOMCP_NEO4J_WRITE_PASSWORD` | *same as `FEOMCP_NEO4J_PASSWORD`* | |
+| `FEOMCP_ONTOLOGY_DIR` | `ontology/` | TBox, shapes, queries, manifest, projection, ABox |
+| `FEOMCP_QUERY_TIMEOUT_MS` | `10000` | Per-query timeout |
+| `FEOMCP_MAX_ROWS` | `50` | Result row cap (also stops reading early) |
+| `FEOMCP_MAX_QUERY_LENGTH` | `8192` | Query string length cap |
+| `FEOMCP_MAX_BATCH` | `500` | Single write batch cap |
+| `FEOMCP_REDACT_FIELDS` | *(empty)* | Comma-separated field names masked at read time |
+| `FEOMCP_ALLOW_SHARED_ACCOUNT` | `0` | `1` permits query and write to share one account (development only) |
 
 **Privilege separation is native database accounts**, not code branches. The server keeps
 two driver sessions and routes by tool group: query tools (1–6, 9, 10) use the read-only
 account, write tools (7, 8) use the read-write account.
 
 `build_server` refuses to start when both point at the same account unless
-`BEOMCP_ALLOW_SHARED_ACCOUNT=1` is set.
+`FEOMCP_ALLOW_SHARED_ACCOUNT=1` is set.
 
 Defaults assume the `docker compose` stack. Production must set the account variables.
 
@@ -491,7 +491,7 @@ The agent should call `search_schema` / `list_queries` first, then
 To see the tools without an agent:
 
 ```bash
-.venv/bin/python -m beomcp.server      # starts the MCP stdio server
+.venv/bin/python -m feomcp.server      # starts the MCP stdio server
 ```
 
 **This is a sample domain.** `ontology/` models enterprise contract management purely
@@ -507,7 +507,7 @@ how to replace it with your own ontology.
 3. **Whitelist is default-deny** and near-empty: built-in read-only functions only. Schema introspection goes through `get_schema()`, so nothing forces the whitelist open. Any procedure added later goes into an explicit config list, off by default.
 4. **Resource caps** — query timeout, row cap, query length cap, write batch cap.
 5. **Audit log** — `tool` / parameter digest / `principal` (caller identity: agent session ID or service account) / `timestamp` / `duration` / `row_count` / `ok`. Full result bodies are **not** logged.
-6. **Field redaction at read time** — `BEOMCP_REDACT_FIELDS` masks values on query return. Storage keeps complete data; writes do not redact. Redaction covers violation details too (`list_violations` messages often embed field values). v1 is global config, not per-principal.
+6. **Field redaction at read time** — `FEOMCP_REDACT_FIELDS` masks values on query return. Storage keeps complete data; writes do not redact. Redaction covers violation details too (`list_violations` messages often embed field values). v1 is global config, not per-principal.
    ```
     # ponytail: field redaction + account separation + audit only; triple-level RBAC/ABAC
     # deferred until compliance requirements are concrete

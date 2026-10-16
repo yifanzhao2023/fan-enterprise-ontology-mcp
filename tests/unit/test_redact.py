@@ -1,4 +1,4 @@
-from beomcp.redact import redact_rows
+from feomcp.redact import redact_rows
 
 
 def test_redacted_field_is_masked():
