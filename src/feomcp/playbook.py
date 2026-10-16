@@ -101,4 +101,10 @@ offline batch job.
 
 Verify a write by reading it back with a named query. `applied: true` says the
 transaction committed, not that the graph looks the way you meant it to.
+
+## Derived facts
+
+After any write, `get_inference_status().stale` is true until the next
+`onto-infer` run. Do not answer a question that needs derived facts while
+`stale` is true without saying so in the answer.
 """

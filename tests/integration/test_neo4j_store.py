@@ -508,3 +508,34 @@ def test_replace_derived_stores_violation_fields(store, tmp_path):
 
     job = store.submit("MATCH (j:InferenceJob {key: 'latest'}) RETURN j", {})[0]["j"]
     assert job["violation_count"] == 1
+
+
+def test_inference_status_tracks_the_derived_layer_lifecycle(store, tmp_path):
+    """Fresh -> stale. After a job -> not stale. After a write -> stale again.
+
+    Derived facts are stale the moment anything is written. The signal is a write
+    counter, not a clock: two writes in the same second still register, and no
+    clock skew can hide one.
+
+    The store fixture is module-scoped, so the precondition is established
+    explicitly rather than assumed from test order.
+    """
+    with store._write.session() as session:
+        session.run("MATCH (j:InferenceJob) DETACH DELETE j")
+        session.run("MATCH (m:StoreMeta) DETACH DELETE m")
+
+    status = store.inference_status()
+    assert status["stale"] is True
+    assert status["status"] == "none"
+
+    inf = tmp_path / "inferred.ttl"
+    inf.write_text("", encoding="utf-8")
+    vis = tmp_path / "violations.ttl"
+    vis.write_text("", encoding="utf-8")
+    store.replace_derived(inf, vis)
+    assert store.inference_status()["stale"] is False
+
+    store.upsert(WriteBatch(entities=[
+        Entity("https://example.org/id/new1", (TBox + "Customer",), {"hasName": "新"}),
+    ]))
+    assert store.inference_status()["stale"] is True

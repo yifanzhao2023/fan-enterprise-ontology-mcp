@@ -114,6 +114,15 @@ class Neo4jStore:
                         _write_entity(tx, entity, inferred=False)
                     for rel in batch.relations:
                         _write_relation(tx, rel, inferred=False)
+                    # A monotonic counter, not a timestamp: get_inference_status
+                    # compares it to the value the last job saw, and two writes in
+                    # the same second still have to register as stale.
+                    tx.run(
+                        "MERGE (m:StoreMeta {key: 'abox'}) SET "
+                        "m.writes = coalesce(m.writes, 0) + 1, "
+                        "m.last_write_at = $now",
+                        {"now": datetime.now(timezone.utc).isoformat(timespec="seconds")},
+                    )
 
                 session.execute_write(work)
         except FeomcpError:
@@ -286,52 +295,32 @@ class Neo4jStore:
         )
 
 
-_SH = Namespace("http://www.w3.org/ns/shacl#")
+    def inference_status(self) -> dict[str, Any]:
+        """Freshness of the derived layer. Never raises — stale is normal.
 
-
-def _violation_nodes(g: Graph, job_id: str) -> list[dict[str, str]]:
-    """Read the pinned violations.ttl shape (one sh:ValidationResult per row)."""
-    out = []
-    for node in g.subjects(RDF.type, _SH["ValidationResult"]):
-        def val(pred):
-            v = g.value(node, pred)
-            return str(v) if v is not None else ""
-
-        out.append({
-            "uri": str(node),
-            "focus": val(_SH["focusNode"]),
-            "shape": val(_SH["resultShape"]),
-            "path": val(_SH["resultPath"]),
-            "message": val(_SH["resultMessage"]),
-            "job": job_id,
-        })
-    return out
-
-
-def _term_index(tbox: Path) -> dict[str, tuple[str, str]]:
-    """Local name -> (ontology IRI, declared rdfs:range or "").
-
-    Anything the TBox does not declare is not an ontology term; it is exported
-    under a visibly synthetic IRI rather than a guessed namespace, so no rule can
-    match it by accident. The range comes along because Neo4j cannot round-trip
-    XSD datatypes on its own.
-    """
-    from rdflib import Graph, URIRef
-
-    g = Graph()
-    g.parse(tbox, format="turtle")
-    index: dict[str, tuple[str, str]] = {}
-    for s, p, o in g:
-        for node in (s, p, o):
-            if isinstance(node, URIRef):
-                index[pred_name(node)] = (str(node), "")
-    for s, p, o in g:
-        if str(p).endswith("#range") and isinstance(o, URIRef):
-            name = pred_name(s)
-            iri = index.get(name, (str(s), ""))[0]
-            index[name] = (iri, str(o))
-    return index
-
+        `status: "ok"` with `derived_count: 0` already means "ran clean, nothing
+        derived"; a run that never got off the ground is `status: "failed"`.
+        """
+        with self._read.session() as session:
+            job = session.run("MATCH (j:InferenceJob {key: 'latest'}) RETURN j").single()
+            meta = session.run("MATCH (m:StoreMeta {key: 'abox'}) RETURN m").single()
+        j = dict(job["j"]) if job else {}
+        m = dict(meta["m"]) if meta else {}
+        writes = int(m.get("writes", 0) or 0)
+        job_writes = int(j.get("abox_writes", 0) or 0)
+        last_ok = j.get("last_ok_job_id")
+        return {
+            "job_id": j.get("job_id"),
+            "status": j.get("status", "none"),
+            "finished_at": j.get("finished_at"),
+            "last_ok_job_id": last_ok,
+            "last_ok_finished_at": j.get("last_ok_finished_at"),
+            "derived_count": j.get("derived_count", 0),
+            "violation_count": j.get("violation_count", 0),
+            "abox_writes": writes,
+            "job_abox_writes": job_writes,
+            "stale": last_ok is None or writes != job_writes,
+        }
 
     def derived_layer_matches(self, **fingerprint: Any) -> bool:
         """True when the last successful job saw identical inputs.
@@ -473,6 +462,54 @@ def _fingerprint_params(fp: Mapping[str, Any]) -> dict[str, Any]:
     out["abox_triples"] = int(fp.get("abox_triples", 0) or 0)
     out["allow_dirty"] = bool(fp.get("allow_dirty", False))
     return out
+
+
+_SH = Namespace("http://www.w3.org/ns/shacl#")
+
+
+def _violation_nodes(g: Graph, job_id: str) -> list[dict[str, str]]:
+    """Read the pinned violations.ttl shape (one sh:ValidationResult per row)."""
+    out = []
+    for node in g.subjects(RDF.type, _SH["ValidationResult"]):
+        def val(pred):
+            v = g.value(node, pred)
+            return str(v) if v is not None else ""
+
+        out.append({
+            "uri": str(node),
+            "focus": val(_SH["focusNode"]),
+            "shape": val(_SH["resultShape"]),
+            "path": val(_SH["resultPath"]),
+            "message": val(_SH["resultMessage"]),
+            "job": job_id,
+        })
+    return out
+
+
+def _term_index(tbox: Path) -> dict[str, tuple[str, str]]:
+    """Local name -> (ontology IRI, declared rdfs:range or "").
+
+    Anything the TBox does not declare is not an ontology term; it is exported
+    under a visibly synthetic IRI rather than a guessed namespace, so no rule can
+    match it by accident. The range comes along because Neo4j cannot round-trip
+    XSD datatypes on its own.
+    """
+    from rdflib import Graph, URIRef
+
+    g = Graph()
+    g.parse(tbox, format="turtle")
+    index: dict[str, tuple[str, str]] = {}
+    for s, p, o in g:
+        for node in (s, p, o):
+            if isinstance(node, URIRef):
+                index[pred_name(node)] = (str(node), "")
+    for s, p, o in g:
+        if str(p).endswith("#range") and isinstance(o, URIRef):
+            name = pred_name(s)
+            iri = index.get(name, (str(s), ""))[0]
+            index[name] = (iri, str(o))
+    return index
+
 
 
 def _previous_job(tx) -> dict[str, Any]:

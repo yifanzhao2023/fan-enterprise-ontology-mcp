@@ -3,12 +3,13 @@ import inspect
 from feomcp import server
 
 
-def test_tool_registry_has_eight_tools():
+def test_tool_registry_has_ten_tools():
     names = set(server.TOOL_NAMES)
     assert names == {
         "search_schema", "get_schema", "get_constraints",
         "list_queries", "run_query", "query_raw",
         "upsert_entities", "upsert_relations",
+        "get_inference_status", "list_violations",
     }
 
 
