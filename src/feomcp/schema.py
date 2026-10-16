@@ -36,9 +36,13 @@ class SchemaCatalog:
             if not needle or needle in c["name"].lower() or any(needle in l.lower() for l in c["labels"]):
                 hits.append({"kind": "class", "name": c["name"], "iri": c["iri"], "match": "name"})
         for p in self._properties.values():
-            if not needle or needle in p["name"].lower():
+            labels = [str(x) for x in p.get("labels", [])]
+            matched = "name" if needle in p["name"].lower() else (
+                "label" if any(needle in x.lower() for x in labels) else None)
+            if not needle or matched:
                 kind = "property" if p["kind"] == "datatype" else "relation"
-                hits.append({"kind": kind, "name": p["name"], "iri": p["iri"], "match": "name"})
+                hits.append({"kind": kind, "name": p["name"], "iri": p["iri"],
+                             "match": matched or "name", "labels": labels})
         return hits[:limit]
 
     def get(self, entity_types: Sequence[str]) -> Sequence[Mapping[str, Any]]:

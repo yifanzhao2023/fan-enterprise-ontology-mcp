@@ -255,3 +255,211 @@ manifest 的 `name` 和文件名对不上。
 
 **`build_server` 报 "query and write accounts are the same account"**
 读写账号相同，安全模型不成立。给查询账号一个只有 `MATCH` 权限的账户，或开发期设 `FEOMCP_ALLOW_SHARED_ACCOUNT=1`。
+
+---
+
+## 12. 场景示例（few-shot）
+
+样例域是企业合同管理。下面六个场景是**本体真能解、普通表格 + SQL 解不了**的问题，
+可以直接当 agent 的示例用。数据来自 `abox.ttl`，答案都能复现验证。
+
+### 场景 1 —— 术语消歧与字段发现
+
+**业务问题**：客户A 名下还没归档的合同，列出金额和状态。
+
+**不查本体会怎样**：agent 会猜字段名。「归档」在本体里是 `archived`、「状态」是 `hasStatus`、
+「金额」是 `hasAmount`；更麻烦的是**归档和状态是两个独立字段**——contract003 状态是
+`closed` 且 `archived: true`，猜混了要么查不出，要么把已归档的当成未归档。
+
+**工具路径**：`search_schema` → `query_raw`
+
+**示例**：
+```
+Q: 客户A 名下还没归档的合同，金额和状态列出来
+
+工具: search_schema("归档")   → archived (property, 标签「已归档」)
+工具: search_schema("客户")   → Customer (class)、belongsToCustomer (relation)
+工具: query_raw("MATCH (c:Customer {uri:$c})<-[:belongsToCustomer]-(k:Contract)
+                 WHERE k.archived = false
+                 RETURN k.uri AS contract_iri, k.hasAmount AS amount, k.hasStatus AS status
+                 ORDER BY k.uri", {"c": "https://example.org/id/customerA"})
+
+A: contract001  1,200,000  draft
+   contract002    800,000  draft
+   （contract003 属于客户A，但 archived=true，被排除）
+```
+
+**本体在这一步起作用**：`rdfs:label` 把中文业务词映射到属性短名；`archived` 与 `hasStatus`
+分开建模，是本体的决定，不是数据库的偶然。
+
+---
+
+### 场景 2 —— 命名查询覆盖标准问题
+
+**业务问题**：销售部的负责人是谁。
+
+**不查本体会怎样**：agent 现编 Cypher，很可能把 `hasHead` 和 `hasOwner` 搞混——前者是
+**部门**负责人，后者是**工单**负责人。查出张三，但问的是李四。
+
+**工具路径**：`list_queries` → `run_query`
+
+**示例**：
+```
+Q: 销售部的负责人是谁
+
+工具: list_queries()  → 看到 CQ-05 department_head「查指定部门的负责人」
+工具: run_query("department_head", {"department_iri": "https://example.org/id/deptSales"})
+
+A: employeeZhang
+```
+
+**本体在这一步起作用**：`hasHead` 的 domain 是 `Department`、range 是 `Employee`，语义写死在
+TBox 里；命名查询把这个语义固化成一个可复用、可回归的问答。
+
+---
+
+### 场景 3 —— 多跳组织追溯
+
+**业务问题**：张三负责的工单属于哪个部门？该部门还有哪些工单、各自谁负责？
+
+**不查本体会怎样**：ID 在工单、部门、员工三处不一致，要多轮 join + 人工对齐；「谁负责」还
+容易被理解成部门负责人（`hasHead`）而非工单负责人（`hasOwner`）。
+
+**工具路径**：`search_schema` → `query_raw`（目录里没有这条组合）
+
+**示例**：
+```
+Q: 张三负责的工单属于哪个部门？该部门还有哪些工单、各自谁负责
+
+工具: search_schema("负责") → hasHead (relation)、hasOwner (relation)
+工具: query_raw("MATCH (e:Employee {uri:$e})<-[:hasOwner]-(w:WorkOrder)
+                 -[:belongsToDepartment]->(d:Department)<-[:belongsToDepartment]-(other:WorkOrder)
+                 OPTIONAL MATCH (other)-[:hasOwner]->(o:Employee)
+                 RETURN w.uri AS mine, d.uri AS dept, other.uri AS work_order_iri, o.uri AS owner_iri",
+                {"e": "https://example.org/id/employeeZhang"})
+
+A: wo001 属于 departmentSales
+   该部门另有 wo002(赵六)、wo003(王五)
+
+（注：Cypher 的一条路径里同一条关系不能走两次，所以 wo001 自己不会出现在「其他工单」里——
+正好对上「还有哪些」的语义。）
+```
+
+**本体在这一步起作用**：`hasOwner` 与 `hasHead` 的 domain/range 让 agent 分得清两种「负责」；
+三跳在关系库里要手工对 ID，在图里是一条路径。
+
+---
+
+### 场景 4 —— 约束要求的合法写入
+
+**业务问题**：给客户C 新签一份 80 万的合同。
+
+**不查本体会怎样**：只写合同实体，被拒。`ContractShape` 对 `belongsToCustomer` 要求
+`minCount 1`——合同必须有归属客户。
+
+**工具路径**：`get_constraints` → `upsert_entities`（实体与关系**同批**）
+
+**示例**：
+```
+Q: 给客户C 新签一份 80 万的合同
+
+工具: get_constraints(["Contract"])
+     → belongsToCustomer  minCount 1 / class Customer
+       hasAmount          datatype decimal / minCount 1 / maxCount 1
+       hasStatus          datatype string  / minCount 1 / maxCount 1
+
+工具: upsert_entities(
+        entities=[{iri: ".../id/contract006", types: [".../onto#Contract"],
+                   properties: {hasAmount: 800000, hasStatus: "draft", archived: false}}],
+        relations=[{source_iri: ".../id/contract006",
+                    predicate_iri: ".../onto#belongsToCustomer",
+                    target_iri: ".../id/customerC"}])
+
+A: {"applied": true, "written_iris": [".../id/contract006"]}
+```
+
+**本体在这一步起作用**：SHACL 的 `minCount` 把「合同必须有归属客户」从文档约定变成硬约束。
+`upsert_entities` 的 `relations` 参数就是为了让一个批能同时表达实体与关系。
+
+---
+
+### 场景 5 —— 约束拒绝的非法写入
+
+**业务问题**：同上，但只写合同，不写归属。
+
+**工具路径**：`upsert_entities` → `VALIDATION_FAILED` → 补上关系 → 重提
+
+**示例**：
+```
+工具: upsert_entities(entities=[{iri: ".../id/contract007", types: [".../onto#Contract"],
+                                 properties: {hasAmount: 800000, hasStatus: "draft", archived: false}}])
+
+A: {"code": "VALIDATION_FAILED",
+    "message": "1 SHACL Core violation(s); first: belongsToCustomer — belongsToCustomer requires at least 1 value(s)",
+    "hint": "fix the reported fields before resubmitting the batch",
+    "retryable": false,
+    "details": {"violations": [{"path": "belongsToCustomer", "kind": "minCount",
+                                "focus_iri": ".../id/contract007", ...}]}}
+
+（补上 relations 后重提 → applied: true）
+```
+
+**本体在这一步起作用**：错误是**字段级**的（`path` + `kind`），agent 能照着改，不是「校验失败」
+四个字。注意 `retryable: false`——原样重试必然再失败，必须改请求。
+
+---
+
+### 场景 6 —— 安全边界
+
+**业务问题**：把 contract001 的金额改成 50 万。
+
+**不查本体会怎样**：agent 直接 `query_raw("MATCH (n) SET n.hasAmount = ...")` 改数据，绕过
+校验、绕过审计、破坏原子性。
+
+**工具路径**：`query_raw` 被拒 → 改用 `upsert_entities`
+
+**示例**：
+```
+工具: query_raw("MATCH (n {uri:$u}) SET n.hasAmount = 500000 RETURN n", {"u": ".../id/contract001"})
+
+A: {"code": "QUERY_REJECTED",
+    "message": "write keyword SET is not allowed",
+    "hint": "queries are read-only; use upsert_entities / upsert_relations to write",
+    "retryable": false,
+    "details": {"rule": "no-write", "keyword": "SET"}}
+
+工具: upsert_entities(
+        entities=[{iri: ".../id/contract001", types: [".../onto#Contract"],
+                   properties: {hasAmount: 500000, hasStatus: "draft", archived: false}}],
+        relations=[{source_iri: ".../id/contract001",
+                    predicate_iri: ".../onto#belongsToCustomer",
+                    target_iri: ".../id/customerA"}])
+
+A: {"applied": true}
+
+工具: run_query("contract_amount", {"contract_iri": ".../id/contract001"})
+A: [{"amount": 500000}]     ← 回读验证，别只看 applied: true
+```
+
+> 上面这段是「执行后会发生什么」的完整过程。`query_raw` 被拒是**现在就能复现**的；
+> 后半段的写入会真的把 contract001 的金额改成 500,000（当前是 1,200,000），
+> 想复现就照做，`make seed` 可随时把样例数据还原。
+
+**本体在这一步起作用**：写入只能走结构化工具，guard 是硬闸。`upsert_entities` 走的是
+单事务 + SHACL 校验 + 审计，`query_raw` 一条都不占。
+
+---
+
+## 13. Plan 2 场景（依赖推理机，v1 跑不了）
+
+下面这些**才是本体最强的卖点**，但需要离线推理（`onto-infer` + JVM `rules-runner`），v1 没有。
+列在这里是为了标明边界，**不要在 v1 的示例里写它们**：
+
+| 场景 | 需要什么 |
+|---|---|
+| 「部门负责人的工单」——自动推出负责人也是工单负责人 | 属性链规则 `belongsToDepartment . hasHead → hasOwner` |
+| 「未归档且超 100 万的重点合同」 | 带算术的类定义，OWL 表达不了，要 Jena Rules |
+| 「谁在什么时候改了这份合同」（合规审计） | 变更日志 + 时序语义（OWL-Time / ISO 8601） |
+| 「合同到期了吗」 | 同上，时序本体 |
+
+这些都是设计文档 §八 明列的缺口。等 Plan 2 落地后，本节转成可运行示例。

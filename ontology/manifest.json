@@ -6,114 +6,407 @@
       "name": "contracts_by_customer",
       "cqid": "CQ-01",
       "question_zh": "列出指定客户名下的全部合同",
-      "params": [{"name": "customer_iri", "type": "iri", "required": true}],
-      "returns": [{"name": "contract_iri", "type": "iri"}, {"name": "status", "type": "string"}],
-      "sample_params": {"customer_iri": "https://example.org/id/customerA"},
-      "sample_result": [{"contract_iri": "https://example.org/id/contract001", "status": "draft"}],
-      "uses": ["Contract", "Customer", "belongsToCustomer", "hasStatus"],
-      "tags": ["合同", "客户"]
+      "params": [
+        {
+          "name": "customer_iri",
+          "type": "iri",
+          "required": true
+        }
+      ],
+      "returns": [
+        {
+          "name": "contract_iri",
+          "type": "iri"
+        },
+        {
+          "name": "status",
+          "type": "string"
+        }
+      ],
+      "sample_params": {
+        "customer_iri": "https://example.org/id/customerA"
+      },
+      "sample_result": [
+        {
+          "contract_iri": "https://example.org/id/contract001",
+          "status": "draft"
+        },
+        {
+          "contract_iri": "https://example.org/id/contract002",
+          "status": "draft"
+        },
+        {
+          "contract_iri": "https://example.org/id/contract003",
+          "status": "closed"
+        }
+      ],
+      "uses": [
+        "Contract",
+        "Customer",
+        "belongsToCustomer",
+        "hasStatus"
+      ],
+      "tags": [
+        "合同",
+        "客户"
+      ]
     },
     {
       "name": "contract_amount",
       "cqid": "CQ-02",
       "question_zh": "查单个合同的金额",
-      "params": [{"name": "contract_iri", "type": "iri", "required": true}],
-      "returns": [{"name": "amount", "type": "decimal"}],
-      "sample_params": {"contract_iri": "https://example.org/id/contract001"},
-      "sample_result": [{"amount": 1200000.0}],
-      "uses": ["Contract", "hasAmount"],
-      "tags": ["合同", "金额"]
+      "params": [
+        {
+          "name": "contract_iri",
+          "type": "iri",
+          "required": true
+        }
+      ],
+      "returns": [
+        {
+          "name": "amount",
+          "type": "decimal"
+        }
+      ],
+      "sample_params": {
+        "contract_iri": "https://example.org/id/contract001"
+      },
+      "sample_result": [
+        {
+          "amount": 1200000
+        }
+      ],
+      "uses": [
+        "Contract",
+        "hasAmount"
+      ],
+      "tags": [
+        "合同",
+        "金额"
+      ]
     },
     {
       "name": "contracts_over_amount_by_customer",
       "cqid": "CQ-03",
       "question_zh": "找出指定客户名下金额超过阈值的合同",
       "params": [
-        {"name": "customer_iri", "type": "iri", "required": true},
-        {"name": "min_amount", "type": "decimal", "required": true, "default": 1000000}
+        {
+          "name": "customer_iri",
+          "type": "iri",
+          "required": true
+        },
+        {
+          "name": "min_amount",
+          "type": "decimal",
+          "required": true,
+          "default": 1000000
+        }
       ],
-      "returns": [{"name": "contract_iri", "type": "iri"}, {"name": "amount", "type": "decimal"}],
-      "sample_params": {"customer_iri": "https://example.org/id/customerA", "min_amount": 1000000},
-      "sample_result": [{"contract_iri": "https://example.org/id/contract001", "amount": 1200000.0}],
-      "uses": ["Contract", "Customer", "hasAmount", "belongsToCustomer"],
-      "tags": ["合同", "金额"]
+      "returns": [
+        {
+          "name": "contract_iri",
+          "type": "iri"
+        },
+        {
+          "name": "amount",
+          "type": "decimal"
+        }
+      ],
+      "sample_params": {
+        "customer_iri": "https://example.org/id/customerA",
+        "min_amount": 1000000
+      },
+      "sample_result": [
+        {
+          "contract_iri": "https://example.org/id/contract001",
+          "amount": 1200000.0
+        }
+      ],
+      "uses": [
+        "Contract",
+        "Customer",
+        "hasAmount",
+        "belongsToCustomer"
+      ],
+      "tags": [
+        "合同",
+        "金额"
+      ]
     },
     {
       "name": "unarchived_contracts_over_amount",
       "cqid": "CQ-04",
       "question_zh": "找出金额超过阈值且未归档的合同",
-      "params": [{"name": "min_amount", "type": "decimal", "required": true, "default": 1000000}],
-      "returns": [{"name": "contract_iri", "type": "iri"}, {"name": "amount", "type": "decimal"}],
-      "sample_params": {"min_amount": 1000000},
-      "sample_result": [{"contract_iri": "https://example.org/id/contract001", "amount": 1200000.0}],
-      "uses": ["Contract", "hasAmount", "archived"],
-      "tags": ["合同", "归档"]
+      "params": [
+        {
+          "name": "min_amount",
+          "type": "decimal",
+          "required": true,
+          "default": 1000000
+        }
+      ],
+      "returns": [
+        {
+          "name": "contract_iri",
+          "type": "iri"
+        },
+        {
+          "name": "amount",
+          "type": "decimal"
+        }
+      ],
+      "sample_params": {
+        "min_amount": 1000000
+      },
+      "sample_result": [
+        {
+          "contract_iri": "https://example.org/id/contract004",
+          "amount": 1500000.0
+        },
+        {
+          "contract_iri": "https://example.org/id/contract001",
+          "amount": 1200000.0
+        }
+      ],
+      "uses": [
+        "Contract",
+        "hasAmount",
+        "archived"
+      ],
+      "tags": [
+        "合同",
+        "归档"
+      ]
     },
     {
       "name": "department_head",
       "cqid": "CQ-05",
       "question_zh": "查指定部门的负责人",
-      "params": [{"name": "department_iri", "type": "iri", "required": true}],
-      "returns": [{"name": "employee_iri", "type": "iri"}],
-      "sample_params": {"department_iri": "https://example.org/id/departmentSales"},
-      "sample_result": [{"employee_iri": "https://example.org/id/employeeZhang"}],
-      "uses": ["Department", "Employee", "hasHead"],
-      "tags": ["组织"]
+      "params": [
+        {
+          "name": "department_iri",
+          "type": "iri",
+          "required": true
+        }
+      ],
+      "returns": [
+        {
+          "name": "employee_iri",
+          "type": "iri"
+        }
+      ],
+      "sample_params": {
+        "department_iri": "https://example.org/id/departmentSales"
+      },
+      "sample_result": [
+        {
+          "employee_iri": "https://example.org/id/employeeZhang"
+        }
+      ],
+      "uses": [
+        "Department",
+        "Employee",
+        "hasHead"
+      ],
+      "tags": [
+        "组织"
+      ]
     },
     {
       "name": "work_orders_by_department",
       "cqid": "CQ-06",
       "question_zh": "列出指定部门的全部工单",
-      "params": [{"name": "department_iri", "type": "iri", "required": true}],
-      "returns": [{"name": "work_order_iri", "type": "iri"}, {"name": "owner_iri", "type": "iri"}],
-      "sample_params": {"department_iri": "https://example.org/id/departmentSales"},
-      "sample_result": [{"work_order_iri": "https://example.org/id/wo001", "owner_iri": "https://example.org/id/employeeZhang"}],
-      "uses": ["WorkOrder", "Department", "belongsToDepartment", "hasOwner"],
-      "tags": ["工单", "组织"]
+      "params": [
+        {
+          "name": "department_iri",
+          "type": "iri",
+          "required": true
+        }
+      ],
+      "returns": [
+        {
+          "name": "work_order_iri",
+          "type": "iri"
+        },
+        {
+          "name": "owner_iri",
+          "type": "iri"
+        }
+      ],
+      "sample_params": {
+        "department_iri": "https://example.org/id/departmentSales"
+      },
+      "sample_result": [
+        {
+          "work_order_iri": "https://example.org/id/wo001",
+          "owner_iri": "https://example.org/id/employeeZhang"
+        },
+        {
+          "work_order_iri": "https://example.org/id/wo002",
+          "owner_iri": "https://example.org/id/employeeZhao"
+        },
+        {
+          "work_order_iri": "https://example.org/id/wo003",
+          "owner_iri": "https://example.org/id/employeeWang"
+        }
+      ],
+      "uses": [
+        "WorkOrder",
+        "Department",
+        "belongsToDepartment",
+        "hasOwner"
+      ],
+      "tags": [
+        "工单",
+        "组织"
+      ]
     },
     {
       "name": "work_orders_owned_by",
       "cqid": "CQ-07",
       "question_zh": "列出指定员工负责的工单",
-      "params": [{"name": "employee_iri", "type": "iri", "required": true}],
-      "returns": [{"name": "work_order_iri", "type": "iri"}],
-      "sample_params": {"employee_iri": "https://example.org/id/employeeZhang"},
-      "sample_result": [{"work_order_iri": "https://example.org/id/wo001"}],
-      "uses": ["WorkOrder", "Employee", "hasOwner"],
-      "tags": ["工单"]
+      "params": [
+        {
+          "name": "employee_iri",
+          "type": "iri",
+          "required": true
+        }
+      ],
+      "returns": [
+        {
+          "name": "work_order_iri",
+          "type": "iri"
+        }
+      ],
+      "sample_params": {
+        "employee_iri": "https://example.org/id/employeeZhang"
+      },
+      "sample_result": [
+        {
+          "work_order_iri": "https://example.org/id/wo001"
+        }
+      ],
+      "uses": [
+        "WorkOrder",
+        "Employee",
+        "hasOwner"
+      ],
+      "tags": [
+        "工单"
+      ]
     },
     {
       "name": "employees_in_department",
       "cqid": "CQ-08",
       "question_zh": "列出指定部门的员工",
-      "params": [{"name": "department_iri", "type": "iri", "required": true}],
-      "returns": [{"name": "employee_iri", "type": "iri"}],
-      "sample_params": {"department_iri": "https://example.org/id/departmentSales"},
-      "sample_result": [{"employee_iri": "https://example.org/id/employeeZhang"}],
-      "uses": ["Employee", "Department", "worksFor"],
-      "tags": ["组织"]
+      "params": [
+        {
+          "name": "department_iri",
+          "type": "iri",
+          "required": true
+        }
+      ],
+      "returns": [
+        {
+          "name": "employee_iri",
+          "type": "iri"
+        }
+      ],
+      "sample_params": {
+        "department_iri": "https://example.org/id/departmentSales"
+      },
+      "sample_result": [
+        {
+          "employee_iri": "https://example.org/id/employeeWang"
+        },
+        {
+          "employee_iri": "https://example.org/id/employeeZhang"
+        },
+        {
+          "employee_iri": "https://example.org/id/employeeZhao"
+        }
+      ],
+      "uses": [
+        "Employee",
+        "Department",
+        "worksFor"
+      ],
+      "tags": [
+        "组织"
+      ]
     },
     {
       "name": "customer_contract_count",
       "cqid": "CQ-09",
       "question_zh": "统计每个客户的合同数量",
       "params": [],
-      "returns": [{"name": "customer_iri", "type": "iri"}, {"name": "contract_count", "type": "integer"}],
+      "returns": [
+        {
+          "name": "customer_iri",
+          "type": "iri"
+        },
+        {
+          "name": "contract_count",
+          "type": "integer"
+        }
+      ],
       "sample_params": {},
-      "sample_result": [{"customer_iri": "https://example.org/id/customerA", "contract_count": 1}],
-      "uses": ["Customer", "Contract", "belongsToCustomer"],
-      "tags": ["统计"]
+      "sample_result": [
+        {
+          "customer_iri": "https://example.org/id/customerA",
+          "contract_count": 3
+        },
+        {
+          "customer_iri": "https://example.org/id/customerB",
+          "contract_count": 2
+        }
+      ],
+      "uses": [
+        "Customer",
+        "Contract",
+        "belongsToCustomer"
+      ],
+      "tags": [
+        "统计"
+      ]
     },
     {
       "name": "contract_status_breakdown",
       "cqid": "CQ-10",
       "question_zh": "按状态统计合同数量",
       "params": [],
-      "returns": [{"name": "status", "type": "string"}, {"name": "contract_count", "type": "integer"}],
+      "returns": [
+        {
+          "name": "status",
+          "type": "string"
+        },
+        {
+          "name": "contract_count",
+          "type": "integer"
+        }
+      ],
       "sample_params": {},
-      "sample_result": [{"status": "draft", "contract_count": 1}],
-      "uses": ["Contract", "hasStatus"],
-      "tags": ["统计"]
+      "sample_result": [
+        {
+          "status": "draft",
+          "contract_count": 3
+        },
+        {
+          "status": "active",
+          "contract_count": 1
+        },
+        {
+          "status": "closed",
+          "contract_count": 1
+        }
+      ],
+      "uses": [
+        "Contract",
+        "hasStatus"
+      ],
+      "tags": [
+        "统计"
+      ]
     }
   ]
 }
