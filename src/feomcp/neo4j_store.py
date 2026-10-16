@@ -295,6 +295,45 @@ class Neo4jStore:
         )
 
 
+    def list_violations(
+        self, focus_iri: str | None = None, job_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Offline SHACL results. Defaults to the latest successful job.
+
+        Old runs must not pile up and confuse a question about the data as it
+        stands now. The spec says "align with the metadata job_id", which is the
+        latest *attempt* — but a failed attempt wrote no violations, so the rows
+        on the graph are from `last_ok_job_id`. Filtering on that is what keeps
+        the default honest.
+        """
+        conds: list[str] = []
+        params: dict[str, Any] = {}
+        if focus_iri is not None:
+            conds.append("n.focus = $focus")
+            params["focus"] = focus_iri
+        if job_id is not None:
+            conds.append("n.job_id = $job")
+            params["job"] = job_id
+        else:
+            rows = self._read_rows(
+                "MATCH (j:InferenceJob {key: 'latest'}) "
+                "RETURN j.last_ok_job_id AS id",
+                {},
+            )
+            ok = rows[0]["id"] if rows else None
+            if ok is None:
+                return []
+            conds.append("n.job_id = $job")
+            params["job"] = ok
+        rows = self._read_rows(
+            "MATCH (n:ConstraintViolation) WHERE " + " AND ".join(conds)
+            + " RETURN n.uri AS uri, n.focus AS focus, n.shape AS shape,"
+            " n.path AS path, n.message AS message, n.job_id AS job_id"
+            " ORDER BY n.uri",
+            params,
+        )
+        return [dict(r) for r in rows]
+
     def inference_status(self) -> dict[str, Any]:
         """Freshness of the derived layer. Never raises — stale is normal.
 

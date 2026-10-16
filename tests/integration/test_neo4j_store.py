@@ -539,3 +539,47 @@ def test_inference_status_tracks_the_derived_layer_lifecycle(store, tmp_path):
         Entity("https://example.org/id/new1", (TBox + "Customer",), {"hasName": "新"}),
     ]))
     assert store.inference_status()["stale"] is True
+
+
+def _write_two_violation_jobs(store, tmp_path):
+    inf = tmp_path / "inferred.ttl"
+    inf.write_text("", encoding="utf-8")
+
+    def vis_file(name, focus):
+        path = tmp_path / name
+        path.write_text(
+            "@prefix sh: <http://www.w3.org/ns/shacl#> ." + chr(10) +
+            f"<urn:feomcp:violation:{name}:0> a sh:ValidationResult ;" + chr(10) +
+            f"    sh:focusNode <{focus}> ;" + chr(10) +
+            '    sh:resultMessage "m" .' + chr(10),
+            encoding="utf-8",
+        )
+        return path
+
+    store.replace_derived(inf, vis_file("a.ttl", "https://example.org/id/contract001"))
+    first = store.inference_status()["job_id"]
+    store.replace_derived(inf, vis_file("b.ttl", "https://example.org/id/contract002"))
+    second = store.inference_status()["job_id"]
+    return first, second
+
+
+def test_list_violations_defaults_to_the_latest_job(store, tmp_path):
+    """History must not pile up and confuse a question about the data as it
+    stands now. `job_id` is for audit and job-to-job comparison."""
+    first, second = _write_two_violation_jobs(store, tmp_path)
+    rows = store.list_violations()
+    assert [r["focus"] for r in rows] == ["https://example.org/id/contract002"]
+    assert all(r["job_id"] == second for r in rows)
+
+
+def test_list_violations_filters_by_focus_and_job(store, tmp_path):
+    """`job_id` narrows to one run. It cannot reach a superseded one: v1 rebuilds
+    the derived layer wholesale, so only the latest job's rows exist. Cross-job
+    comparison needs history retention, which is deferred on purpose."""
+    first, second = _write_two_violation_jobs(store, tmp_path)
+
+    assert store.list_violations(focus_iri="https://example.org/id/contract001") == []
+    assert [r["focus"] for r in store.list_violations(focus_iri="https://example.org/id/contract002")]         == ["https://example.org/id/contract002"]
+
+    assert [r["focus"] for r in store.list_violations(job_id=second)]         == ["https://example.org/id/contract002"]
+    assert store.list_violations(job_id=first) == []
