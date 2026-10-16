@@ -3,7 +3,8 @@
 The sample ontology ships a sample ABox so the demo and the CI suite have real
 data to run against. The loader hands the parsed triples to the same
 representation writer the MCP upsert tools use, so a seeded graph and a
-tool-written graph are indistinguishable — and n10s-compatible either way.
+tool-written graph are indistinguishable.
+
 """
 
 from pathlib import Path

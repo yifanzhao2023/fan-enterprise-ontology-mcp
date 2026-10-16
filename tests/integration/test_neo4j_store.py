@@ -334,7 +334,7 @@ def test_materialize_rdf_round_trips_the_seeded_abox(store, tmp_path):
 
 def test_materialize_rdf_excludes_internal_metadata_nodes(store, tmp_path):
     """:ChangeEvent / :InferenceJob / :StoreMeta / :ConstraintViolation all carry a
-    `uri`. If n10s exports them, the rules engine sees operational metadata as
+    `uri`. If the exporter let them through, the rules engine sees operational metadata as
     business instances and may derive from it."""
     from rdflib import Graph
     # Employee has no shape, so the write-time SHACL does not stand in the way
