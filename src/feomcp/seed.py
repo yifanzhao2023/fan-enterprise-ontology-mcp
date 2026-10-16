@@ -8,6 +8,7 @@ tool-written graph are indistinguishable — and n10s-compatible either way.
 
 from pathlib import Path
 
+from decimal import Decimal
 from rdflib import Graph, Literal, RDF
 
 from .ports import Entity, Relation, WriteBatch
@@ -35,7 +36,11 @@ def load_abox(ttl_path: Path) -> WriteBatch:
         if pred == RDF.type:
             types.setdefault(iri, []).append(str(obj))
         elif isinstance(obj, Literal):
-            props.setdefault(iri, {})[_local(pred)] = obj.toPython()
+            value = obj.toPython()
+            # Neo4j has no Decimal column type; store the number as a float.
+            # The TBox restores the declared datatype on export.
+            props.setdefault(iri, {})[_local(pred)] = (
+                float(value) if isinstance(value, Decimal) else value)
         else:
             rels.append(Relation(iri, str(pred), str(obj)))
 

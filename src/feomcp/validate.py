@@ -185,3 +185,47 @@ def write_violations(
             g.add((node, SH.resultPath, URIRef(v.path)))
         g.add((node, SH.resultMessage, Literal(v.message)))
     g.serialize(destination=str(dest), format="turtle")
+
+
+def validate_full(data_paths: Sequence[Path], shapes_path: Path) -> list[Violation]:
+    """Offline full validation over the merged data graph.
+
+    Unlike validate_core this runs everything shapes.ttl holds, including
+    SHACL-AF and SPARQL constraints (advanced=True). It is the only place those
+    run: the write path deliberately refuses them as too slow.
+
+    The TBox rides along in the data graph so `sh:class` can see subclass
+    relations. Shapes target instances, so no TBox axiom is itself validated.
+    """
+    import pyshacl
+
+    data = Graph()
+    for path in data_paths:
+        if path.exists() and path.stat().st_size:
+            data.parse(path, format="turtle")
+
+    conforms, results_graph, _text = pyshacl.validate(
+        data_graph=data,
+        shacl_graph=str(shapes_path),
+        advanced=True,
+        abort_on_first=False,
+        meta_shacl=False,
+        inplace=False,
+    )
+    if conforms:
+        return []
+
+    out: list[Violation] = []
+    for node in results_graph.subjects(RDF.type, SH["ValidationResult"]):
+        def val(pred: str) -> str:
+            v = results_graph.value(node, SH[pred])
+            return str(v) if v is not None else ""
+
+        out.append(Violation(
+            focus_iri=val("focusNode"),
+            shape_iri=val("resultShape"),
+            path=val("resultPath"),
+            message=val("resultMessage"),
+            kind=val("resultSeverity") or "violation",
+        ))
+    return out

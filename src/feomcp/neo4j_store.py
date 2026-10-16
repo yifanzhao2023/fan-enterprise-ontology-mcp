@@ -170,10 +170,21 @@ class Neo4jStore:
                 )
             ]
 
-        index = _term_index(self._settings.ontology_dir / "TBox.ttl")
+        terms = _term_index(self._settings.ontology_dir / "TBox.ttl")
+        index = {k: v[0] for k, v in terms.items()}
+        ranges = {k: v[1] for k, v in terms.items()}
 
         def term(name: str) -> URIRef:
             return URIRef(index.get(name, f"urn:feomcp:term:{name}"))
+
+        def value_of(name: str, raw: Any) -> Any:
+            """The TBox declares the range; Neo4j only holds a Python value.
+
+            Without this the round trip loses xsd:decimal (a float comes back
+            as xsd:double) and the offline SHACL flags every contract.
+            """
+            dt = ranges.get(name)
+            return Literal(raw, datatype=URIRef(dt)) if dt else Literal(raw)
 
         g = Graph()
         for row in nodes:
@@ -189,7 +200,7 @@ class Neo4jStore:
             for key, value in (row["p"] or {}).items():
                 if key == "uri" or key.startswith("inf_") or key in derived_props:
                     continue
-                g.add((subject, term(key), Literal(value)))
+                g.add((subject, term(key), value_of(key, value)))
         for row in edges:
             s, o = URIRef(row["s"]), URIRef(row["o"])
             if str(s).startswith("urn:feomcp:") or str(o).startswith("urn:feomcp:"):
@@ -292,22 +303,28 @@ def _violation_nodes(g: Graph, job_id: str) -> list[dict[str, str]]:
     return out
 
 
-def _term_index(tbox: Path) -> dict[str, str]:
-    """Local name -> ontology IRI, read back out of the TBox.
+def _term_index(tbox: Path) -> dict[str, tuple[str, str]]:
+    """Local name -> (ontology IRI, declared rdfs:range or "").
 
     Anything the TBox does not declare is not an ontology term; it is exported
     under a visibly synthetic IRI rather than a guessed namespace, so no rule can
-    match it by accident.
+    match it by accident. The range comes along because Neo4j cannot round-trip
+    XSD datatypes on its own.
     """
     from rdflib import Graph, URIRef
 
     g = Graph()
     g.parse(tbox, format="turtle")
-    index: dict[str, str] = {}
+    index: dict[str, tuple[str, str]] = {}
     for s, p, o in g:
         for node in (s, p, o):
             if isinstance(node, URIRef):
-                index[pred_name(node)] = str(node)
+                index[pred_name(node)] = (str(node), "")
+    for s, p, o in g:
+        if str(p).endswith("#range") and isinstance(o, URIRef):
+            name = pred_name(s)
+            iri = index.get(name, (str(s), ""))[0]
+            index[name] = (iri, str(o))
     return index
 
 

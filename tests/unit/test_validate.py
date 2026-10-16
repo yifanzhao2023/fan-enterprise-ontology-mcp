@@ -156,3 +156,56 @@ def test_write_violations_emits_pinned_validation_results(tmp_path):
     assert g.value(r, NSH.resultShape) == URIRef("https://example.org/onto#ContractShape")
     assert g.value(r, NSH.resultPath) == URIRef("https://example.org/onto#hasAmount")
     assert str(g.value(r, NSH.resultMessage)) == "less than 1"
+
+
+def test_validate_full_reports_violations_on_the_merged_graph(tmp_path):
+    from feomcp.validate import validate_full
+
+    abox = tmp_path / "abox.ttl"
+    abox.write_text(
+        "@prefix onto: <https://example.org/onto#> .\n"
+        "@prefix ex:   <https://example.org/id/> .\n"
+        'ex:contract001 a onto:Contract ; onto:hasStatus "draft" .\n',
+        encoding="utf-8",
+    )
+    inferred = tmp_path / "inferred.ttl"
+    inferred.write_text("", encoding="utf-8")
+
+    violations = validate_full([abox, inferred], Path("ontology/shapes.ttl"))
+    paths = {v.path for v in violations}
+    assert any(p.endswith("#hasAmount") for p in paths), violations
+    assert any(p.endswith("#belongsToCustomer") for p in paths), violations
+
+
+def test_validate_full_passes_when_the_sample_abox_is_complete(tmp_path):
+    """The seeded ABox is written to satisfy shapes.ttl; the merged graph with an
+    empty inferred layer must be clean."""
+    from feomcp.validate import validate_full
+
+    inferred = tmp_path / "inferred.ttl"
+    inferred.write_text("", encoding="utf-8")
+    violations = validate_full([Path("ontology/abox.ttl"), inferred], Path("ontology/shapes.ttl"))
+    assert violations == [], violations
+
+
+def test_validate_full_merges_the_inferred_layer_into_the_data_graph(tmp_path):
+    from feomcp.validate import validate_full
+
+    abox = tmp_path / "abox.ttl"
+    abox.write_text(
+        "@prefix onto: <https://example.org/onto#> .\n"
+        "@prefix ex:   <https://example.org/id/> .\n"
+        'ex:contract001 a onto:Contract ; onto:hasStatus "draft" ; onto:hasAmount 1 .\n',
+        encoding="utf-8",
+    )
+    inferred = tmp_path / "inferred.ttl"
+    inferred.write_text(
+        "@prefix onto: <https://example.org/onto#> .\n"
+        "@prefix ex:   <https://example.org/id/> .\n"
+        "ex:customerA a onto:Customer ." + chr(10) + 
+        "ex:contract001 onto:belongsToCustomer ex:customerA .\n",
+        encoding="utf-8",
+    )
+    violations = validate_full([abox, inferred], Path("ontology/shapes.ttl"))
+    paths = {v.path for v in violations}
+    assert not any(p.endswith("#belongsToCustomer") for p in paths), violations
