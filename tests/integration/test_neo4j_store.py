@@ -146,7 +146,7 @@ def test_agent_supplied_type_name_rejects_identifier_injection(store):
     from beomcp.errors import WriteRejected
 
     batch = WriteBatch(entities=[
-        Entity(iri="https://example.org/id/evil2", types=(TBox + "Customer` DETACH DELETE n //",), properties={}),
+        Entity(iri="https://example.org/id/evil2", types=(TBox + "Customer` DETACH DELETE n",), properties={}),
     ])
     with pytest.raises(WriteRejected):
         store.upsert(batch)
@@ -252,3 +252,107 @@ def test_backend_failure_maps_to_opaque_backend_unavailable(store):
     finally:
         store._read = saved
         bad.close()
+
+
+def test_replace_derived_twice_preserves_the_abox_node(store, tmp_path):
+    """Derived types are annotations on an instance. Rebuilding the derived layer
+    must never take the instance — or its edges — with it."""
+    store.upsert(WriteBatch(
+        entities=[Entity("https://example.org/id/keep", (TBox + "Customer",), {"hasName": "keep"})],
+    ))
+    inf = tmp_path / "inferred.ttl"
+    inf.write_text(
+        "@prefix onto: <https://example.org/onto#> .\n"
+        "<https://example.org/id/keep> a onto:KeyCustomer .\n",
+        encoding="utf-8",
+    )
+    vis = tmp_path / "violations.ttl"
+    vis.write_text("", encoding="utf-8")
+
+    store.replace_derived(inf, vis)
+    store.replace_derived(inf, vis)  # second job is the one that used to destroy it
+
+    rows = store.submit(
+        "MATCH (n {uri: $u}) RETURN count(n) AS c, n.hasName AS v",
+        {"u": "https://example.org/id/keep"},
+    )
+    assert rows[0]["c"] == 1
+    assert rows[0]["v"] == "keep"
+
+
+def test_derived_label_is_stripped_on_rebuild(store, tmp_path):
+    inf = tmp_path / "inferred.ttl"
+    inf.write_text(
+        "@prefix onto: <https://example.org/onto#> .\n"
+        "<https://example.org/id/keep> a onto:KeyCustomer .\n",
+        encoding="utf-8",
+    )
+    vis = tmp_path / "violations.ttl"
+    vis.write_text("", encoding="utf-8")
+    store.replace_derived(inf, vis)
+    assert store.submit(
+        "MATCH (n:KeyCustomer {uri: $u}) RETURN count(n) AS c",
+        {"u": "https://example.org/id/keep"},
+    )[0]["c"] == 1
+
+    inf.write_text("", encoding="utf-8")
+    store.replace_derived(inf, vis)
+    assert store.submit(
+        "MATCH (n:KeyCustomer {uri: $u}) RETURN count(n) AS c",
+        {"u": "https://example.org/id/keep"},
+    )[0]["c"] == 0
+    assert store.submit(
+        "MATCH (n {uri: $u}) RETURN count(n) AS c",
+        {"u": "https://example.org/id/keep"},
+    )[0]["c"] == 1
+
+
+def test_inferred_relations_are_cleared_on_rebuild(store, tmp_path):
+    # both endpoints must exist first: a derived relation joins two ABox nodes
+    store.upsert(WriteBatch(entities=[
+        Entity("https://example.org/id/keep", (TBox + "Customer",), {"hasName": "keep"}),
+        Entity("https://example.org/id/roled", (TBox + "Employee",), {}),
+    ]))
+    inf = tmp_path / "inferred.ttl"
+    inf.write_text(
+        "@prefix onto: <https://example.org/onto#> .\n"
+        "<https://example.org/id/keep> onto:knows <https://example.org/id/roled> .\n",
+        encoding="utf-8",
+    )
+    vis = tmp_path / "violations.ttl"
+    vis.write_text("", encoding="utf-8")
+    store.replace_derived(inf, vis)
+    assert store.submit(
+        "MATCH ()-[r]->() WHERE r.inferred = true RETURN count(r) AS c", {}
+    )[0]["c"] == 1
+
+    inf.write_text("", encoding="utf-8")
+    store.replace_derived(inf, vis)
+    assert store.submit(
+        "MATCH ()-[r]->() WHERE r.inferred = true RETURN count(r) AS c", {}
+    )[0]["c"] == 0
+
+
+def test_same_iri_with_different_type_sets_collapses_to_one_node(store):
+    """MERGE on (n:Label {uri}) matches the whole pattern; two type sets would
+    create two nodes and later fan relation writes out."""
+    store.upsert(WriteBatch(entities=[Entity("https://example.org/id/roled", (TBox + "Employee",), {})]))
+    store.upsert(WriteBatch(entities=[
+        Entity("https://example.org/id/roled", (TBox + "Employee", TBox + "Department"), {}),
+    ]))
+    rows = store.submit(
+        "MATCH (n {uri: $u}) RETURN count(n) AS c", {"u": "https://example.org/id/roled"}
+    )
+    assert rows[0]["c"] == 1
+
+
+def test_type_names_that_are_cypher_keywords_or_have_hyphens_write_cleanly(store):
+    for name in ("Set", "Pre-Paid", "Match"):
+        store.upsert(WriteBatch(entities=[
+            Entity(f"https://example.org/id/kw-{name}", (TBox + name,), {"hasName": name}),
+        ]))
+    rows = store.submit(
+        "MATCH (n) WHERE n.hasName IN $names RETURN count(n) AS c",
+        {"names": ["Set", "Pre-Paid", "Match"]},
+    )
+    assert rows[0]["c"] == 3

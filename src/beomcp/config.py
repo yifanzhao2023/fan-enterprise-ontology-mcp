@@ -18,6 +18,7 @@ class Settings:
     max_query_length: int
     max_batch: int
     redact_fields: tuple[str, ...]
+    allow_shared_account: bool
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
@@ -43,6 +44,8 @@ class Settings:
             redact_fields=tuple(
                 f.strip() for f in s("BEOMCP_REDACT_FIELDS", "").split(",") if f.strip()
             ),
+            allow_shared_account=s("BEOMCP_ALLOW_SHARED_ACCOUNT", "").lower()
+            in ("1", "true", "yes"),
         )
         settings.validate()
         return settings

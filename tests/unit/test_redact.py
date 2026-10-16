@@ -15,3 +15,17 @@ def test_input_rows_are_not_mutated():
     rows = [{"amount": 1}]
     redact_rows(rows, ["amount"])
     assert rows == [{"amount": 1}]
+
+
+def test_nested_keys_are_masked():
+    rows = [{"c": {"uri": "x", "hasAmount": 1200000}}, {"hasAmount": 5}]
+    out = redact_rows(rows, ["hasAmount"])
+    assert out[0]["c"]["hasAmount"] == "***"
+    assert out[0]["c"]["uri"] == "x"
+    assert out[1]["hasAmount"] == "***"
+
+
+def test_keys_inside_lists_are_masked():
+    rows = [{"items": [{"hasAmount": 1}, {"hasAmount": 2}]}]
+    out = redact_rows(rows, ["hasAmount"])
+    assert [i["hasAmount"] for i in out[0]["items"]] == ["***", "***"]

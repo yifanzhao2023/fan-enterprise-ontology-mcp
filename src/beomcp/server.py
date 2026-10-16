@@ -6,7 +6,7 @@ from mcp.server.mcpserver import MCPServer
 from .audit import AuditLogger
 from .catalog import Catalog
 from .config import Settings
-from .errors import BackendUnavailable, BeomcpError
+from .errors import BackendUnavailable, BeomcpError, WriteRejected
 from .neo4j_store import Neo4jStore
 from .ports import Entity, Relation, WriteBatch
 from .redact import redact_rows
@@ -85,6 +85,12 @@ def _call(
 
 def build_server(settings: Settings | None = None, *, principal: str = "agent") -> MCPServer:
     s = settings or Settings.from_env()
+    if s.neo4j_user == s.neo4j_write_user and not s.allow_shared_account:
+        raise ValueError(
+            "query and write accounts are the same account; query tools must use a "
+            "read-only account. Grant MATCH-only to a separate reader, or set "
+            "BEOMCP_ALLOW_SHARED_ACCOUNT=1 to accept this (development only)."
+        )
     store = Neo4jStore(s)
     schema = SchemaCatalog.load(s.ontology_dir)
     catalog = Catalog.load(s.ontology_dir)
@@ -159,7 +165,7 @@ def build_server(settings: Settings | None = None, *, principal: str = "agent") 
             rows = catalog.run(store, name, params)
             return _envelope(rows, truncated=len(rows) >= s.max_rows)
 
-        return call("run_query", {"name": name}, work)
+        return call("run_query", {"name": name, "params": params}, work)
 
     @mcp.tool()
     def query_raw(cypher: str, params: dict[str, Any]) -> dict[str, Any]:
@@ -169,36 +175,118 @@ def build_server(settings: Settings | None = None, *, principal: str = "agent") 
             rows = store.submit(cypher, params, lang="cypher")
             return _envelope(rows, truncated=len(rows) >= s.max_rows)
 
-        return call("query_raw", {"cypher": cypher}, work)
+        return call("query_raw", {"cypher": cypher, "params": params}, work)
 
     @mcp.tool()
-    def upsert_entities(entities: list[dict[str, Any]]) -> dict[str, Any]:
-        """Write instances. Structured parameters, not Cypher. Atomic batch."""
+    def upsert_entities(
+        entities: list[dict[str, Any]],
+        relations: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Write instances. Structured parameters, not Cypher. Atomic batch.
+
+        Pass `relations` alongside `entities` when the shape constrains an object
+        property (a Contract needs its belongsToCustomer): the batch is validated
+        and written as one unit, so both halves land together or not at all.
+        """
 
         def work():
-            batch = WriteBatch(entities=[
-                Entity(iri=e["iri"], types=tuple(e["types"]),
-                       properties=e.get("properties", {}))
-                for e in entities
-            ])
+            batch = WriteBatch(
+                entities=_coerce_entities(entities),
+                relations=_coerce_relations(relations or []),
+            )
             return _receipt(store.upsert(batch))
 
-        return call("upsert_entities", {"entities": entities}, work)
+        return call(
+            "upsert_entities",
+            {"entities": entities, "relations": relations or []},
+            work,
+        )
 
     @mcp.tool()
-    def upsert_relations(relations: list[dict[str, Any]]) -> dict[str, Any]:
-        """Write relations between existing instances. Atomic batch."""
+    def upsert_relations(
+        relations: list[dict[str, Any]],
+        entities: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Write relations between instances. Atomic batch.
+
+        Pass `entities` alongside `relations` to create the endpoints and the
+        edges in one transaction, validated together.
+        """
 
         def work():
-            batch = WriteBatch(relations=[
-                Relation(r["source_iri"], r["predicate_iri"], r["target_iri"])
-                for r in relations
-            ])
+            batch = WriteBatch(
+                entities=_coerce_entities(entities or []),
+                relations=_coerce_relations(relations),
+            )
             return _receipt(store.upsert(batch))
 
-        return call("upsert_relations", {"relations": relations}, work)
+        return call(
+            "upsert_relations",
+            {"relations": relations, "entities": entities or []},
+            work,
+        )
 
     return mcp
+
+
+def _coerce_entities(raw: Sequence[Any]) -> list[Entity]:
+    """Trust boundary: the agent's JSON must match the shape or be refused with
+    a field-level error. A bare string in `types` would otherwise be split into
+    one label per character and written without complaint."""
+    out: list[Entity] = []
+    for i, item in enumerate(raw):
+        if not isinstance(item, Mapping):
+            raise WriteRejected(
+                f"entities[{i}] must be an object",
+                hint='pass {"iri": ..., "types": [...], "properties": {...}}',
+                details={"index": i},
+            )
+        iri = item.get("iri")
+        if not isinstance(iri, str) or not iri:
+            raise WriteRejected(
+                f"entities[{i}].iri must be a non-empty string",
+                hint="every instance needs an IRI",
+                details={"index": i, "field": "iri"},
+            )
+        types = item.get("types")
+        if not isinstance(types, list) or not all(isinstance(t, str) and t for t in types):
+            raise WriteRejected(
+                f"entities[{i}].types must be a list of strings",
+                hint='pass types as ["https://example.org/onto#Contract"]',
+                details={"index": i, "field": "types"},
+            )
+        props = item.get("properties", {})
+        if not isinstance(props, Mapping):
+            raise WriteRejected(
+                f"entities[{i}].properties must be an object",
+                hint="pass datatype properties as key/value pairs",
+                details={"index": i, "field": "properties"},
+            )
+        out.append(Entity(iri=iri, types=tuple(types), properties=dict(props)))
+    return out
+
+
+def _coerce_relations(raw: Sequence[Any]) -> list[Relation]:
+    out: list[Relation] = []
+    for i, item in enumerate(raw):
+        if not isinstance(item, Mapping):
+            raise WriteRejected(
+                f"relations[{i}] must be an object",
+                hint='pass {"source_iri": ..., "predicate_iri": ..., "target_iri": ...}',
+                details={"index": i},
+            )
+        values = []
+        for field in ("source_iri", "predicate_iri", "target_iri"):
+            value = item.get(field)
+            if not isinstance(value, str) or not value:
+                raise WriteRejected(
+                    f"relations[{i}].{field} must be a non-empty string",
+                    hint="every relation needs a source, a predicate and a target",
+                    details={"index": i, "field": field},
+                )
+            values.append(value)
+        out.append(Relation(*values))
+    return out
 
 
 def _receipt(r) -> dict[str, Any]:

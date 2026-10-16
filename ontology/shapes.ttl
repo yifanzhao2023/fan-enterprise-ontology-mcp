@@ -8,8 +8,7 @@ onto:ContractShape a sh:NodeShape ;
         sh:path onto:hasAmount ;
         sh:datatype xsd:decimal ;
         sh:minCount 1 ;
-        sh:maxCount 1 ;
-        sh:minInclusive "0"^^xsd:decimal
+        sh:maxCount 1
     ] ;
     sh:property [
         sh:path onto:belongsToCustomer ;
