@@ -8,6 +8,7 @@ from .catalog import Catalog
 from .config import Settings
 from .errors import BackendUnavailable, BeomcpError, WriteRejected
 from .neo4j_store import Neo4jStore
+from .playbook import QUERY_PLAYBOOK, WRITE_PLAYBOOK
 from .ports import Entity, Relation, WriteBatch
 from .redact import redact_rows
 from .schema import SchemaCatalog
@@ -234,6 +235,66 @@ def build_server(settings: Settings | None = None, *, principal: str = "agent") 
             {"relations": relations, "entities": entities or []},
             work,
         )
+
+
+    # ---- resources: reference material an agent can pull on demand ----
+
+    def _read_ontology_file(name: str) -> str:
+        path = s.ontology_dir / name
+        return path.read_text(encoding="utf-8") if path.exists() else f"(missing: {name})"
+
+    @mcp.resource(
+        "ontology://playbook",
+        name="playbook",
+        description="How to query and write against this ontology — decision tree, error handling, write rules",
+        mime_type="text/markdown",
+    )
+    def _res_playbook() -> str:
+        return QUERY_PLAYBOOK + "\n---\n\n" + WRITE_PLAYBOOK
+
+    @mcp.resource(
+        "ontology://catalog",
+        name="catalog",
+        description="Named competency questions: what each one answers and what parameters it takes",
+        mime_type="text/markdown",
+    )
+    def _res_catalog() -> str:
+        lines = []
+        for d in catalog.list():
+            lines.append(f"## {d.cqid} — {d.name}")
+            lines.append(d.question_zh)
+            lines.append("params: " + (", ".join(f"{q.name}: {q.type}" for q in d.params) or "(none)"))
+        return "\n\n".join(lines) or "(empty catalog)"
+
+    @mcp.resource("ontology://tbox", name="tbox",
+                  description="TBox.ttl source — human reference, not used at runtime",
+                  mime_type="text/turtle")
+    def _res_tbox() -> str:
+        return _read_ontology_file("TBox.ttl")
+
+    @mcp.resource("ontology://shapes", name="shapes",
+                  description="shapes.ttl source — SHACL constraints",
+                  mime_type="text/turtle")
+    def _res_shapes() -> str:
+        return _read_ontology_file("shapes.ttl")
+
+    @mcp.resource("ontology://schema", name="schema",
+                  description="Full schema projection — large; for human reference, never into a prompt",
+                  mime_type="application/json")
+    def _res_schema() -> str:
+        return _read_ontology_file("schema.projection.json")
+
+    # ---- prompts: the playbooks, invocable by name ----
+
+    @mcp.prompt(name="query-playbook",
+                description="Read the schema, pick a named query, fall back to raw Cypher, handle errors")
+    def _prompt_query() -> str:
+        return QUERY_PLAYBOOK
+
+    @mcp.prompt(name="write-playbook",
+                description="Write structure, how to fix validation failures, when derived facts update")
+    def _prompt_write() -> str:
+        return WRITE_PLAYBOOK
 
     return mcp
 
