@@ -8,7 +8,7 @@ export FEOMCP_NEO4J_USER ?= neo4j
 export FEOMCP_NEO4J_PASSWORD ?= password
 export FEOMCP_NEO4J_URI ?= bolt://localhost:7687
 
-.PHONY: demo test unit integration e2e lint-projection projection seed up down
+.PHONY: demo test unit integration e2e lint-projection projection seed up down rules-runner
 
 up:
 	docker compose up -d --wait
@@ -22,6 +22,9 @@ projection:
 seed: projection
 	$(PYTHON) -m feomcp.cli seed --abox ontology/abox.ttl
 
+rules-runner:
+	mvn -q -f jvm/pom.xml package
+
 lint-projection: projection
 	git diff --exit-code -- ontology/schema.projection.json || \
 		(echo "schema.projection.json out of date; commit the regenerated file" && exit 1)
@@ -29,7 +32,7 @@ lint-projection: projection
 unit:
 	$(PYTHON) -m pytest tests/unit -v
 
-integration:
+integration: rules-runner
 	$(PYTHON) -m pytest tests/integration -v
 
 e2e: projection
