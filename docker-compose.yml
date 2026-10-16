@@ -1,0 +1,27 @@
+services:
+  neo4j:
+    image: neo4j:5.26-community
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      NEO4J_AUTH: neo4j/password
+    volumes:
+      - neo4j-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:7474 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+# No APOC: the Cypher guard rejects every apoc.* call, and leaving the plugin
+# out means the database cannot run one either (defence in depth) and the stack
+# needs no download from Neo4j's plugin site at startup.
+#
+# neosemantics (n10s) is required for Neo4jStore.materialize_rdf, which the
+# offline inference pipeline uses. It is not on Neo4j's official plugin list:
+# mount the matching n10s jar into /plugins and allow "n10s.*" in
+# NEO4J_dbms_security_procedures_unrestricted. That lands with Plan 2.
+
+volumes:
+  neo4j-data:
