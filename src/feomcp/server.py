@@ -206,7 +206,7 @@ def build_server(settings: Settings | None = None, *, principal: str = "agent") 
                 entities=_coerce_entities(entities),
                 relations=_coerce_relations(relations or []),
             )
-            return _receipt(store.upsert(batch))
+            return _receipt(store.upsert(batch, actor=principal))
 
         return call(
             "upsert_entities",
@@ -230,7 +230,7 @@ def build_server(settings: Settings | None = None, *, principal: str = "agent") 
                 entities=_coerce_entities(entities or []),
                 relations=_coerce_relations(relations),
             )
-            return _receipt(store.upsert(batch))
+            return _receipt(store.upsert(batch, actor=principal))
 
         return call(
             "upsert_relations",

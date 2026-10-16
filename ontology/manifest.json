@@ -503,6 +503,48 @@
         "合同",
         "时序"
       ]
+    },
+    {
+      "name": "contract_change_history",
+      "cqid": "CQ-13",
+      "question_zh": "谁在什么时候改了这份合同",
+      "params": [
+        {
+          "name": "contract_iri",
+          "type": "iri",
+          "required": true
+        }
+      ],
+      "returns": [
+        {
+          "name": "at",
+          "type": "dateTime"
+        },
+        {
+          "name": "actor",
+          "type": "string"
+        },
+        {
+          "name": "predicate",
+          "type": "string"
+        },
+        {
+          "name": "old_value",
+          "type": "string"
+        },
+        {
+          "name": "new_value",
+          "type": "string"
+        }
+      ],
+      "sample_params": {
+        "contract_iri": "https://example.org/id/contract001"
+      },
+      "sample_result": [],
+      "uses": [],
+      "tags": [
+        "审计"
+      ]
     }
   ]
 }

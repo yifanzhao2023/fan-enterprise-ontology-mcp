@@ -17,7 +17,7 @@ class FakeEngine:
 
 def test_catalog_loads_all_queries():
     cat = Catalog.load(Path("ontology"))
-    assert len(cat.list()) == 12
+    assert len(cat.list()) == 13
 
 
 def test_manifest_using_unknown_class_fails_at_load():

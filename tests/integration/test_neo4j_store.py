@@ -583,3 +583,41 @@ def test_list_violations_filters_by_focus_and_job(store, tmp_path):
 
     assert [r["focus"] for r in store.list_violations(job_id=second)]         == ["https://example.org/id/contract002"]
     assert store.list_violations(job_id=first) == []
+
+
+def test_upsert_records_a_change_event_per_changed_field(store):
+    store.upsert(WriteBatch(
+        entities=[Entity("https://example.org/id/ch1", (TBox + "Customer",), {"hasName": "甲"})],
+    ), actor="alice")
+    rows = store.list_changes("https://example.org/id/ch1")
+    assert rows
+    assert all(r["actor"] == "alice" for r in rows)
+    assert {r["predicate"] for r in rows} >= {"hasName"}
+    assert all(r["at"] for r in rows)
+
+
+def test_upsert_skips_a_change_event_when_the_value_is_unchanged(store):
+    store.upsert(WriteBatch(
+        entities=[Entity("https://example.org/id/ch2", (TBox + "Customer",), {"hasName": "乙"})],
+    ), actor="alice")
+    before = store.list_changes("https://example.org/id/ch2")
+    store.upsert(WriteBatch(
+        entities=[Entity("https://example.org/id/ch2", (TBox + "Customer",), {"hasName": "乙"})],
+    ), actor="bob")
+    after = store.list_changes("https://example.org/id/ch2")
+    assert len(after) == len(before)
+    assert all(r["actor"] == "alice" for r in after)
+
+
+def test_change_events_survive_a_derived_rebuild(store, tmp_path):
+    """The compliance log is append-only operational history, not ABox. A
+    rebuild of the derived layer must never touch it."""
+    store.upsert(WriteBatch(
+        entities=[Entity("https://example.org/id/ch3", (TBox + "Customer",), {"hasName": "丙"})],
+    ), actor="alice")
+    inf = tmp_path / "inferred.ttl"
+    inf.write_text("", encoding="utf-8")
+    vis = tmp_path / "violations.ttl"
+    vis.write_text("", encoding="utf-8")
+    store.replace_derived(inf, vis)
+    assert store.list_changes("https://example.org/id/ch3")
