@@ -208,7 +208,13 @@ class Neo4jStore:
             g.add((s, term(row["t"]), o))
         g.serialize(destination=str(dest), format="turtle")
 
-    def replace_derived(self, inferred: Path, violations: Path) -> WriteReceipt:
+    def replace_derived(
+        self,
+        inferred: Path,
+        violations: Path,
+        *,
+        fingerprint: Mapping[str, Any] | None = None,
+    ) -> WriteReceipt:
         """Replace the derived layer in one transaction.
 
         Derived facts are annotations on existing ABox nodes and edges, never
@@ -257,19 +263,18 @@ class Neo4jStore:
                         "n.message = $message, n.job_id = $job",
                         row,
                     )
-                tx.run(
-                    "MERGE (j:InferenceJob {key: 'latest'}) "
-                    "SET j.job_id = $job_id, j.finished_at = $finished_at, "
-                    "    j.derived_count = $derived, j.violation_count = $violations, "
-                    "    j.derived_labels = $labels, j.derived_properties = $props",
-                    {
-                        "job_id": job_id,
-                        "finished_at": finished_at,
-                        "derived": len(g),
-                        "violations": len(_violation_nodes(v, job_id)),
-                        "labels": derived_labels,
-                        "props": derived_props,
-                    },
+                _write_job_row(
+                    tx,
+                    job_id=job_id,
+                    status="ok",
+                    derived_count=len(g),
+                    violation_count=len(_violation_nodes(v, job_id)),
+                    derived_labels=derived_labels,
+                    derived_properties=derived_props,
+                    finished_at=finished_at,
+                    abox_writes=_current_abox_writes(tx),
+                    neo4j_version=_neo4j_version(tx),
+                    **(fingerprint or {}),
                 )
 
             session.execute_write(work)
@@ -326,6 +331,148 @@ def _term_index(tbox: Path) -> dict[str, tuple[str, str]]:
             iri = index.get(name, (str(s), ""))[0]
             index[name] = (iri, str(o))
     return index
+
+
+    def derived_layer_matches(self, **fingerprint: Any) -> bool:
+        """True when the last successful job saw identical inputs.
+
+        Four keys on purpose. Dropping `shapes` would silently skip a run that
+        only changed the SHACL rules — the derived facts would be the same but
+        the violations would not.
+        """
+        rows = self._read_rows(
+            "MATCH (j:InferenceJob {key: 'latest'}) WHERE j.status = 'ok' "
+            "RETURN j.hash_tbox AS tbox, j.hash_rules AS rules, "
+            "j.hash_abox AS abox, j.hash_shapes AS shapes",
+            {},
+        )
+        if not rows:
+            return False
+        row = rows[0]
+        return bool(row["tbox"]) and (
+            row["tbox"] == fingerprint.get("hash_tbox")
+            and row["rules"] == fingerprint.get("hash_rules")
+            and row["abox"] == fingerprint.get("hash_abox")
+            and row["shapes"] == fingerprint.get("hash_shapes")
+        )
+
+    def record_inference_failure(
+        self, job_id: str, error: str, **fingerprint: Any
+    ) -> None:
+        """Record a failed attempt without touching the derived layer.
+
+        The previous successful job's annotations stay exactly where they are;
+        only the singleton job row moves forward, and its derived_* fields are
+        left alone so the row still describes what is actually in the graph.
+        """
+        with self._write.session() as session:
+
+            def work(tx):
+                _write_job_row(
+                    tx,
+                    job_id=job_id,
+                    status="failed",
+                    error=str(error)[:300],
+                    **fingerprint,
+                )
+
+            session.execute_write(work)
+
+
+
+
+def _current_abox_writes(tx) -> int:
+    row = tx.run("MATCH (m:StoreMeta {key: 'abox'}) RETURN m").single()
+    return int(dict(row["m"]).get("writes", 0) or 0) if row else 0
+
+
+def _neo4j_version(tx) -> str:
+    row = tx.run(
+        "CALL dbms.components() YIELD name, versions "
+        "WHERE name CONTAINS 'Neo4j' RETURN versions[0] AS v"
+    ).single()
+    return str(row["v"]) if row and row["v"] is not None else ""
+
+
+def _write_job_row(
+    tx,
+    *,
+    job_id: str,
+    status: str,
+    error: str = "",
+    derived_count: int | None = None,
+    violation_count: int | None = None,
+    derived_labels: Sequence[str] | None = None,
+    derived_properties: Sequence[str] | None = None,
+    finished_at: str | None = None,
+    **fingerprint: Any,
+) -> None:
+    """One singleton row.
+
+    Success overwrites the derived-layer fields; failure leaves them alone, so
+    the row always describes both the latest attempt and the derived layer that
+    is actually in the graph.
+    """
+    from datetime import datetime, timezone
+
+    finished_at = finished_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
+    if status == "ok":
+        tx.run(
+            "MERGE (j:InferenceJob {key: 'latest'}) SET "
+            "j.job_id = $job_id, j.status = $status, j.error = $error, "
+            "j.finished_at = $finished_at, j.last_ok_job_id = $job_id, "
+            "j.last_ok_finished_at = $finished_at, "
+            "j.derived_count = $derived, j.violation_count = $violations, "
+            "j.derived_labels = $labels, j.derived_properties = $props, "
+            "j.git_sha = $git_sha, j.allow_dirty = $allow_dirty, "
+            "j.hash_abox = $hash_abox, j.hash_tbox = $hash_tbox, "
+            "j.hash_rules = $hash_rules, j.hash_shapes = $hash_shapes, "
+            "j.hash_inferred = $hash_inferred, j.hash_violations = $hash_violations, "
+            "j.neo4j_version = $neo4j_version, j.n10s_version = $n10s_version, "
+            "j.abox_writes = $abox_writes, j.abox_triples = $abox_triples",
+            {
+                "job_id": job_id,
+                "status": status,
+                "error": error,
+                "finished_at": finished_at,
+                "derived": derived_count,
+                "violations": violation_count,
+                "labels": list(derived_labels or []),
+                "props": list(derived_properties or []),
+                **_fingerprint_params(fingerprint),
+            },
+        )
+    else:
+        # Derived-layer fields are deliberately untouched.
+        tx.run(
+            "MERGE (j:InferenceJob {key: 'latest'}) SET "
+            "j.job_id = $job_id, j.status = $status, j.error = $error, "
+            "j.finished_at = $finished_at, j.git_sha = $git_sha, "
+            "j.allow_dirty = $allow_dirty",
+            {
+                "job_id": job_id,
+                "status": status,
+                "error": error,
+                "finished_at": finished_at,
+                "git_sha": fingerprint.get("git_sha", ""),
+                "allow_dirty": bool(fingerprint.get("allow_dirty", False)),
+            },
+        )
+
+
+def _fingerprint_params(fp: Mapping[str, Any]) -> dict[str, Any]:
+    keys = (
+        "hash_abox", "hash_tbox", "hash_rules",
+        "hash_shapes", "hash_inferred", "hash_violations",
+    )
+    out: dict[str, Any] = {k: str(fp.get(k, "") or "") for k in keys}
+    out["git_sha"] = str(fp.get("git_sha", "") or "")
+    out["neo4j_version"] = str(fp.get("neo4j_version", "") or "")
+    out["n10s_version"] = str(fp.get("n10s_version", "") or "")
+    out["abox_writes"] = int(fp.get("abox_writes", 0) or 0)
+    out["abox_triples"] = int(fp.get("abox_triples", 0) or 0)
+    out["allow_dirty"] = bool(fp.get("allow_dirty", False))
+    return out
 
 
 def _previous_job(tx) -> dict[str, Any]:

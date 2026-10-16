@@ -229,3 +229,48 @@ def validate_full(data_paths: Sequence[Path], shapes_path: Path) -> list[Violati
             kind=val("resultSeverity") or "violation",
         ))
     return out
+
+
+# --- TBox profile gate -------------------------------------------------------
+# The modelling contract locks the TBox to the Jena OWL 2 RL subset. Jena has no
+# OWL2RLProfile class (that is OWL API), so this is the spec's documented
+# fallback: a constructor blacklist. It is not complete, and it is checked here
+# — once, in Python — before the JVM is ever launched.
+
+
+def _tbox_local_names(tbox: Path) -> tuple[set[str], set[str]]:
+    """Return (names used as predicates, names used as types)."""
+    g = Graph()
+    g.parse(tbox, format="turtle")
+    predicates = {_local(p) for _s, p, _o in g}
+    types: set[str] = set()
+    for _s, p, o in g:
+        if str(p).endswith("#type"):
+            types.add(_local(o))
+    return predicates, types
+
+
+def banned_owl_constructs(tbox: Path) -> list[str]:
+    """Constructs the modelling contract forbids outright.
+
+    These break the reasoning strategy, not just the vocabulary: a rules engine
+    cannot honour them and silently derives nothing.
+    """
+    predicates, types = _tbox_local_names(tbox)
+    banned = {"unionOf", "complementOf", "oneOf", "hasValue", "disjointWith"}
+    return sorted((predicates | types) & banned)
+
+
+def unmodelled_characteristics(tbox: Path) -> list[str]:
+    """Legal OWL 2 RL that the rules engine silently ignores.
+
+    Declaring these is not an error — write the rule yourself in
+    ontology/rules/ — but it must not be a surprise.
+    """
+    predicates, types = _tbox_local_names(tbox)
+    unmodelled = {
+        "TransitiveProperty", "SymmetricProperty", "ReflexiveProperty",
+        "IrreflexiveProperty", "AsymmetricProperty", "inverseOf",
+        "propertyChainAxiom",
+    }
+    return sorted((predicates | types) & unmodelled)
