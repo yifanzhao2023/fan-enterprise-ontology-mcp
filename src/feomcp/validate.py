@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from rdflib import RDF, Graph
+from rdflib import RDF, Graph, Literal, URIRef
 from rdflib import Namespace
 
 from .errors import ValidationFailed
@@ -163,3 +163,25 @@ def _matches_datatype(value: Any, datatype: Any) -> bool:
         return isinstance(value, str)
     # Fail closed: a datatype we cannot check is a datatype we do not accept.
     return False
+
+
+def write_violations(
+    violations: Sequence[Violation], dest: Path, job_id: str
+) -> None:
+    """Serialize violations in the pinned shape.
+
+    One named `sh:ValidationResult` per violation. A blank node would be useless
+    as a `:ConstraintViolation.uri` in Neo4j, and a triple soup would make
+    `list_violations(focus_iri=...)` impossible to filter.
+    """
+    g = Graph()
+    for i, v in enumerate(violations):
+        node = URIRef(f"urn:feomcp:violation:{job_id}:{i}")
+        g.add((node, RDF.type, SH.ValidationResult))
+        g.add((node, SH.focusNode, URIRef(v.focus_iri)))
+        if v.shape_iri:
+            g.add((node, SH.resultShape, URIRef(v.shape_iri)))
+        if v.path:
+            g.add((node, SH.resultPath, URIRef(v.path)))
+        g.add((node, SH.resultMessage, Literal(v.message)))
+    g.serialize(destination=str(dest), format="turtle")

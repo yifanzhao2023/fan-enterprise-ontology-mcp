@@ -124,3 +124,35 @@ def test_unknown_datatype_fails_closed():
         e = ent("https://example.org/id/c1", "Contract", hasStatus="draft")
         violations = validate_core([e], path)
         assert [v for v in violations if v.path == "hasStatus"], violations
+
+
+def test_write_violations_emits_pinned_validation_results(tmp_path):
+    """One named sh:ValidationResult per violation.
+
+    A blank node would be useless as a `:ConstraintViolation.uri` in Neo4j, and a
+    triple soup would make `list_violations(focus_iri=...)` impossible to filter.
+    """
+    from rdflib import RDF, Graph, URIRef
+
+    from feomcp.validate import SH as NSH, Violation, write_violations
+
+    v = Violation(
+        focus_iri="https://example.org/id/contract001",
+        shape_iri="https://example.org/onto#ContractShape",
+        path="https://example.org/onto#hasAmount",
+        message="less than 1",
+        kind="minCount",
+    )
+    out = tmp_path / "violations.ttl"
+    write_violations([v], out, job_id="0a1b2c3d4e5f")
+
+    g = Graph()
+    g.parse(out, format="turtle")
+    results = list(g.subjects(RDF.type, NSH.ValidationResult))
+    assert len(results) == 1
+    r = results[0]
+    assert str(r) == "urn:feomcp:violation:0a1b2c3d4e5f:0"
+    assert g.value(r, NSH.focusNode) == URIRef("https://example.org/id/contract001")
+    assert g.value(r, NSH.resultShape) == URIRef("https://example.org/onto#ContractShape")
+    assert g.value(r, NSH.resultPath) == URIRef("https://example.org/onto#hasAmount")
+    assert str(g.value(r, NSH.resultMessage)) == "less than 1"

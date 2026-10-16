@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Literal, Mapping, Sequence
 
 from neo4j import GraphDatabase
-from rdflib import Graph, Literal as RdfLiteral
+from rdflib import Graph, Literal as RdfLiteral, Namespace, RDF
 
 from .config import Settings
 from .errors import BackendUnavailable, FeomcpError, QueryLimitExceeded, QuerySyntaxError, WriteRejected
@@ -239,10 +239,12 @@ class Neo4jStore:
                         _write_relation(
                             tx, Relation(str(subj), str(pred), str(obj)), inferred=True
                         )
-                for subj, _pred, obj in v:
+                for row in _violation_nodes(v, job_id):
                     tx.run(
-                        "MERGE (n:ConstraintViolation {uri: $uri}) SET n.message = $msg",
-                        {"uri": str(subj), "msg": str(obj)},
+                        "MERGE (n:ConstraintViolation {uri: $uri}) SET "
+                        "n.focus = $focus, n.shape = $shape, n.path = $path, "
+                        "n.message = $message, n.job_id = $job",
+                        row,
                     )
                 tx.run(
                     "MERGE (j:InferenceJob {key: 'latest'}) "
@@ -253,7 +255,7 @@ class Neo4jStore:
                         "job_id": job_id,
                         "finished_at": finished_at,
                         "derived": len(g),
-                        "violations": len(v),
+                        "violations": len(_violation_nodes(v, job_id)),
                         "labels": derived_labels,
                         "props": derived_props,
                     },
@@ -266,6 +268,28 @@ class Neo4jStore:
             validation={"violations": []},
             applied=True,
         )
+
+
+_SH = Namespace("http://www.w3.org/ns/shacl#")
+
+
+def _violation_nodes(g: Graph, job_id: str) -> list[dict[str, str]]:
+    """Read the pinned violations.ttl shape (one sh:ValidationResult per row)."""
+    out = []
+    for node in g.subjects(RDF.type, _SH["ValidationResult"]):
+        def val(pred):
+            v = g.value(node, pred)
+            return str(v) if v is not None else ""
+
+        out.append({
+            "uri": str(node),
+            "focus": val(_SH["focusNode"]),
+            "shape": val(_SH["resultShape"]),
+            "path": val(_SH["resultPath"]),
+            "message": val(_SH["resultMessage"]),
+            "job": job_id,
+        })
+    return out
 
 
 def _term_index(tbox: Path) -> dict[str, str]:

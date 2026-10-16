@@ -479,3 +479,32 @@ def test_derived_relation_never_claims_an_abox_edge(store, tmp_path):
         {"s": "https://example.org/id/woA", "t": "https://example.org/id/empA"},
     )
     assert rows[0]["c"] == 1
+
+
+def test_replace_derived_stores_violation_fields(store, tmp_path):
+    """The offline SHACL rows have to be queryable by focus and by job, so each
+    one lands as its own node with the four fields the spec names."""
+    inf = tmp_path / "inferred.ttl"
+    inf.write_text("", encoding="utf-8")
+    vis = tmp_path / "violations.ttl"
+    vis.write_text(
+        "@prefix sh: <http://www.w3.org/ns/shacl#> .\n"
+        "<urn:feomcp:violation:aa:0> a sh:ValidationResult ;\n"
+        "    sh:focusNode <https://example.org/id/contract001> ;\n"
+        "    sh:resultShape <https://example.org/onto#ContractShape> ;\n"
+        "    sh:resultPath <https://example.org/onto#hasAmount> ;\n"
+        '    sh:resultMessage "less than 1" .\n',
+        encoding="utf-8",
+    )
+    store.replace_derived(inf, vis)
+    rows = store.submit(
+        "MATCH (n:ConstraintViolation {uri: $u}) RETURN n", {"u": "urn:feomcp:violation:aa:0"},
+    )
+    assert rows[0]["n"]["focus"] == "https://example.org/id/contract001"
+    assert rows[0]["n"]["shape"] == "https://example.org/onto#ContractShape"
+    assert rows[0]["n"]["path"] == "https://example.org/onto#hasAmount"
+    assert rows[0]["n"]["message"] == "less than 1"
+    assert rows[0]["n"]["job_id"]
+
+    job = store.submit("MATCH (j:InferenceJob {key: 'latest'}) RETURN j", {})[0]["j"]
+    assert job["violation_count"] == 1
