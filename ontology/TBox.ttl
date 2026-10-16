@@ -70,3 +70,16 @@ onto:hasName a owl:DatatypeProperty ;
     rdfs:domain onto:Customer ;
     rdfs:range  xsd:string ;
     rdfs:label "名称"@zh , "name"@en .
+
+# --- derived class ---
+# Populated only by ontology/rules/business.rules via onto-infer. OWL cannot
+# express the amount threshold, so a TBox axiom here would be a lie.
+
+onto:KeyContract a owl:Class ;
+    rdfs:subClassOf onto:Contract ;
+    rdfs:label "重点合同"@zh , "Key contract"@en .
+
+onto:hasEndDate a owl:DatatypeProperty ;
+    rdfs:domain onto:Contract ;
+    rdfs:range  xsd:dateTime ;
+    rdfs:label "到期时间"@zh , "end date"@en .

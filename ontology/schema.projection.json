@@ -43,6 +43,14 @@
           "min": null,
           "name": "archived",
           "range": "boolean"
+        },
+        {
+          "iri": "https://example.org/onto#hasEndDate",
+          "kind": "datatype",
+          "max": null,
+          "min": null,
+          "name": "hasEndDate",
+          "range": "dateTime"
         }
       ],
       "relations_in": [],
@@ -157,6 +165,20 @@
         }
       ],
       "superclasses": []
+    },
+    {
+      "iri": "https://example.org/onto#KeyContract",
+      "labels": [
+        "Key contract",
+        "重点合同"
+      ],
+      "name": "KeyContract",
+      "properties": [],
+      "relations_in": [],
+      "relations_out": [],
+      "superclasses": [
+        "Contract"
+      ]
     },
     {
       "iri": "https://example.org/onto#WorkOrder",
@@ -318,6 +340,17 @@
       ],
       "name": "hasAmount",
       "range": "decimal"
+    },
+    {
+      "domain": "Contract",
+      "iri": "https://example.org/onto#hasEndDate",
+      "kind": "datatype",
+      "labels": [
+        "end date",
+        "到期时间"
+      ],
+      "name": "hasEndDate",
+      "range": "dateTime"
     },
     {
       "domain": "Department",

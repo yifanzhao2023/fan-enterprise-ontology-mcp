@@ -15,9 +15,9 @@ class FakeEngine:
         return [{"contract_iri": "https://example.org/id/c1", "amount": 1200000}]
 
 
-def test_catalog_loads_ten_queries():
+def test_catalog_loads_all_queries():
     cat = Catalog.load(Path("ontology"))
-    assert len(cat.list()) == 10
+    assert len(cat.list()) == 12
 
 
 def test_manifest_using_unknown_class_fails_at_load():

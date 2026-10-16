@@ -74,3 +74,16 @@ def test_customer_shape_requires_a_name_property():
     assert (EX.hasName, RDF.type, OWL.DatatypeProperty) in g
     assert (EX.hasName, RDFS.domain, EX.Customer) in g
     assert (EX.hasName, RDFS.range, XSD.string) in g
+
+
+def test_key_contract_is_a_contract_subclass():
+    g = load("ontology/TBox.ttl")
+    assert (EX.KeyContract, RDF.type, OWL.Class) in g
+    assert (EX.KeyContract, RDFS.subClassOf, EX.Contract) in g
+
+
+def test_has_end_date_is_a_datetime_property_of_contract():
+    g = load("ontology/TBox.ttl")
+    assert (EX.hasEndDate, RDF.type, OWL.DatatypeProperty) in g
+    assert (EX.hasEndDate, RDFS.domain, EX.Contract) in g
+    assert (EX.hasEndDate, RDFS.range, XSD.dateTime) in g

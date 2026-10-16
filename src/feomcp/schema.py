@@ -33,8 +33,12 @@ class SchemaCatalog:
         needle = keywords.strip().lower()
         hits: list[dict[str, Any]] = []
         for c in self._classes.values():
-            if not needle or needle in c["name"].lower() or any(needle in l.lower() for l in c["labels"]):
-                hits.append({"kind": "class", "name": c["name"], "iri": c["iri"], "match": "name"})
+            labels = [str(x) for x in c.get("labels", [])]
+            matched = "name" if needle in c["name"].lower() else (
+                "label" if any(needle in x.lower() for x in labels) else None)
+            if not needle or matched:
+                hits.append({"kind": "class", "name": c["name"], "iri": c["iri"],
+                             "match": matched or "name", "labels": labels})
         for p in self._properties.values():
             labels = [str(x) for x in p.get("labels", [])]
             matched = "name" if needle in p["name"].lower() else (

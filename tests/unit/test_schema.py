@@ -70,3 +70,26 @@ def test_search_finds_a_relation_by_chinese_label():
     s = SchemaCatalog.load(Path("ontology"))
     hits = s.search("归属客户", limit=10)
     assert "belongsToCustomer" in {h["name"] for h in hits}
+
+
+def test_search_reports_label_match_for_classes(tmp_path):
+    """A class found through its Chinese label must not claim the name matched —
+    the agent uses `match` to judge how strong the hit is."""
+    import json
+
+    proj = {
+        "classes": [{
+            "name": "KeyContract", "iri": "https://example.org/onto#KeyContract",
+            "labels": ["重点合同", "Key contract"],
+        }],
+        "properties": [],
+    }
+    (tmp_path / "schema.projection.json").write_text(
+        json.dumps(proj), encoding="utf-8"
+    )
+    catalog = SchemaCatalog.load(tmp_path)
+
+    by_label = catalog.search("重点")
+    assert [(h["name"], h["match"]) for h in by_label] == [("KeyContract", "label")]
+    by_name = catalog.search("keycontract")
+    assert [(h["name"], h["match"]) for h in by_name] == [("KeyContract", "name")]
