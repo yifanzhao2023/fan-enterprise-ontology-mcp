@@ -130,10 +130,72 @@ class Neo4jStore:
         )
 
     def materialize_rdf(self, dest: Path) -> None:
+        """ABox -> Turtle for the offline reasoner. Business instances only.
+
+        Derived facts stay out on purpose. Exporting them would make the next
+        run's delta empty, `replace_derived` would then strip the layer, and the
+        two would oscillate. So do the internal rows — change log, job metadata,
+        store counters and violations each carry a `uri`, and none of them is
+        business data.
+
+        The writer stores only local names (they land in Cypher identifier
+        slots), so the ontology IRIs come back from the TBox.
+        """
+        from rdflib import Graph, Literal, URIRef
+        from rdflib.namespace import RDF
+
+        job_rows = self._read_rows(
+            "MATCH (j:InferenceJob {key: 'latest'}) "
+            "RETURN j.derived_labels AS labels, j.derived_properties AS props",
+            {},
+        )
+        derived_labels = set(job_rows[0]["labels"] or []) if job_rows else set()
+        derived_props = set(job_rows[0]["props"] or []) if job_rows else set()
+
         with self._read.session() as session:
-            rows = session.run("CALL n10s.rdf.export.all({format: 'Turtle'})")
-            turtle = rows.single()[0]
-        Path(dest).write_text(turtle, encoding="utf-8")
+            nodes = [
+                dict(r)
+                for r in session.run(
+                    "MATCH (n) WHERE n.uri IS NOT NULL "
+                    "RETURN n.uri AS u, labels(n) AS ls, properties(n) AS p"
+                )
+            ]
+            edges = [
+                dict(r)
+                for r in session.run(
+                    "MATCH (a)-[r]->(b) "
+                    "WHERE a.uri IS NOT NULL AND b.uri IS NOT NULL "
+                    "  AND (r.inferred IS NULL OR r.inferred = false) "
+                    "RETURN a.uri AS s, type(r) AS t, b.uri AS o"
+                )
+            ]
+
+        index = _term_index(self._settings.ontology_dir / "TBox.ttl")
+
+        def term(name: str) -> URIRef:
+            return URIRef(index.get(name, f"urn:feomcp:term:{name}"))
+
+        g = Graph()
+        for row in nodes:
+            subject = URIRef(row["u"])
+            if str(subject).startswith("urn:feomcp:"):
+                continue
+            labels = [
+                lab for lab in (row["ls"] or [])
+                if lab not in ("Resource", "INFERRED") and lab not in derived_labels
+            ]
+            for lab in sorted(labels):
+                g.add((subject, RDF.type, term(lab)))
+            for key, value in (row["p"] or {}).items():
+                if key == "uri" or key.startswith("inf_") or key in derived_props:
+                    continue
+                g.add((subject, term(key), Literal(value)))
+        for row in edges:
+            s, o = URIRef(row["s"]), URIRef(row["o"])
+            if str(s).startswith("urn:feomcp:") or str(o).startswith("urn:feomcp:"):
+                continue
+            g.add((s, term(row["t"]), o))
+        g.serialize(destination=str(dest), format="turtle")
 
     def replace_derived(self, inferred: Path, violations: Path) -> WriteReceipt:
         """Replace the derived layer in one transaction.
@@ -204,6 +266,25 @@ class Neo4jStore:
             validation={"violations": []},
             applied=True,
         )
+
+
+def _term_index(tbox: Path) -> dict[str, str]:
+    """Local name -> ontology IRI, read back out of the TBox.
+
+    Anything the TBox does not declare is not an ontology term; it is exported
+    under a visibly synthetic IRI rather than a guessed namespace, so no rule can
+    match it by accident.
+    """
+    from rdflib import Graph, URIRef
+
+    g = Graph()
+    g.parse(tbox, format="turtle")
+    index: dict[str, str] = {}
+    for s, p, o in g:
+        for node in (s, p, o):
+            if isinstance(node, URIRef):
+                index[pred_name(node)] = str(node)
+    return index
 
 
 def _previous_job(tx) -> dict[str, Any]:

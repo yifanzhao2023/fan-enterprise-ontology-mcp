@@ -18,10 +18,10 @@ services:
 # out means the database cannot run one either (defence in depth) and the stack
 # needs no download from Neo4j's plugin site at startup.
 #
-# neosemantics (n10s) is required for Neo4jStore.materialize_rdf, which the
-# offline inference pipeline uses. It is not on Neo4j's official plugin list:
-# mount the matching n10s jar into /plugins and allow "n10s.*" in
-# NEO4J_dbms_security_procedures_unrestricted. That lands with Plan 2.
+# ABox export is done by Neo4jStore.materialize_rdf in Python (rdflib), not by
+# neosemantics. The n10s 5.26.0 jar shades a Jackson that clashes with Neo4j's
+# own and takes the server down at boot, so the plugin is deliberately absent —
+# which also means no `n10s.*` procedure needs to be unrestricted.
 
 volumes:
   neo4j-data:

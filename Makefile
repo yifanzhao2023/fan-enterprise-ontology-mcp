@@ -1,4 +1,3 @@
-N10S_VERSION ?= 5.26.0
 # Prefer the project venv on either platform; fall back to whatever is on PATH.
 VENV_PYTHON := $(firstword $(wildcard .venv/bin/python .venv/Scripts/python))
 PYTHON ?= $(if $(VENV_PYTHON),$(VENV_PYTHON),python3)

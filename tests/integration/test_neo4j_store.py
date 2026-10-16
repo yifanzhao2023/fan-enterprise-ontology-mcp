@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from testcontainers.community.neo4j import Neo4jContainer
 
@@ -356,3 +358,70 @@ def test_type_names_that_are_cypher_keywords_or_have_hyphens_write_cleanly(store
         {"names": ["Set", "Pre-Paid", "Match"]},
     )
     assert rows[0]["c"] == 3
+
+
+def test_materialize_rdf_round_trips_the_seeded_abox(store, tmp_path):
+    """Every ABox fact the representation writer stored must come back out as RDF.
+
+    Without this, onto-infer exports an empty abox.ttl, derives nothing, and the
+    agent is told there are no derived facts while the rules should have fired.
+    """
+    from rdflib import RDF, Graph, URIRef
+    from feomcp.seed import load_abox
+
+    batch = load_abox(Path("ontology/abox.ttl"))
+    store.upsert(batch)
+
+    out = tmp_path / "abox.ttl"
+    store.materialize_rdf(out)
+    g = Graph()
+    g.parse(out, format="turtle")
+
+    ex = URIRef("https://example.org/id/")
+    onto = "https://example.org/onto#"
+    assert (ex + "contract001", RDF.type, URIRef(onto + "Contract")) in g
+    assert (ex + "customerA", RDF.type, URIRef(onto + "Customer")) in g
+    # datatype property with a Chinese literal survives
+    names = [str(o) for s, p, o in g if str(p).endswith("#hasName")]
+    assert "客户A" in names
+    # object property survives
+    assert (
+        ex + "contract001",
+        URIRef(onto + "belongsToCustomer"),
+        ex + "customerA",
+    ) in g
+    # every entity in the batch is present in the export
+    exported = {str(s) for s in g.subjects()}
+    missing = [e.iri for e in batch.entities if e.iri not in exported]
+    assert not missing, missing
+
+
+def test_materialize_rdf_excludes_internal_metadata_nodes(store, tmp_path):
+    """:ChangeEvent / :InferenceJob / :StoreMeta / :ConstraintViolation all carry a
+    `uri`. If n10s exports them, the rules engine sees operational metadata as
+    business instances and may derive from it."""
+    from rdflib import Graph
+
+    # Employee has no shape, so the write-time SHACL does not stand in the way
+    store.upsert(WriteBatch(
+        entities=[Entity("https://example.org/id/c9", (TBox + "Employee",), {})],
+    ))
+    inf = tmp_path / "inferred.ttl"
+    inf.write_text("", encoding="utf-8")
+    vis = tmp_path / "violations.ttl"
+    vis.write_text(
+        "@prefix sh: <http://www.w3.org/ns/shacl#> .\n"
+        "<urn:feomcp:violation:zz:0> a sh:ValidationResult ;\n"
+        '    sh:focusNode <https://example.org/id/c9> ;\n'
+        '    sh:resultMessage "m" .\n',
+        encoding="utf-8",
+    )
+    store.replace_derived(inf, vis)
+
+    out = tmp_path / "abox.ttl"
+    store.materialize_rdf(out)
+    g = Graph()
+    g.parse(out, format="turtle")
+    subjects = {str(s) for s in g.subjects()}
+    assert not any(s.startswith("urn:feomcp:") for s in subjects), subjects
+    assert "https://example.org/id/c9" in subjects
