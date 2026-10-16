@@ -45,5 +45,5 @@ ci-infer-gate: lint-projection unit demo
 
 test: unit integration
 
-demo: up seed infer
+demo: down up seed infer
 	$(PYTHON) -m pytest tests/e2e -v

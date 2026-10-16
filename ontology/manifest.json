@@ -373,10 +373,6 @@
         {
           "customer_iri": "https://example.org/id/customerB",
           "contract_count": 2
-        },
-        {
-          "customer_iri": "https://example.org/id/customerC",
-          "contract_count": 2
         }
       ],
       "uses": [
@@ -407,7 +403,7 @@
       "sample_result": [
         {
           "status": "draft",
-          "contract_count": 5
+          "contract_count": 3
         },
         {
           "status": "active",
