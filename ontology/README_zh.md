@@ -4,8 +4,10 @@
 > 目的是让 server 开箱能跑、CI 有东西可回归；真实使用请整份换成你自己的数据。
 > 换掉它们**不需要改任何 Python 代码**。
 
-**支持场景**：术语消歧、命名查询、多跳组织、合法写入、非法写入、安全边界等众多常见场景
-（见[第 12 节](#12-场景示例（few-shot）)与[第 13 节](#13-推理场景（跑过-make-infer-之后）)）。
+**支持场景**：术语消歧、命名查询、多跳组织、合法写入、非法写入、安全边界、离线派生事实，
+以及从外部 ERP 批量导入
+（见[第 12 节](#12-场景示例（few-shot）)、[第 13 节](#13-推理场景（跑过-make-infer-之后）)
+与[第 14 节](#14-从业务系统批量导入onto-import)）。
 
 | | |
 |---|---|
@@ -13,11 +15,12 @@
 | 类 / 属性 | 7 类、10 属性 |
 | 命名查询 | 13 条（CQ-01 … CQ-13） |
 | Jena 规则 | 2 条（部门负责人工单、重点合同） |
+| 导入映射 | `mapping/odoo.yaml` + `mapping/irules.yaml`（参考源：Odoo） |
 | 换成本体 | 本文件第 10 节 / [`README.md`](README.md)（English） |
 
 ---
 
-## 1. 七个文件
+## 1. 本目录的文件
 
 | 文件 | 谁写 | 运行时谁读 | 说明 |
 |---|---|---|---|
@@ -28,6 +31,9 @@
 | `schema.projection.json` | **机器生成** | `SchemaCatalog`（工具 `search_schema` / `get_schema` / `get_constraints`） | 查询侧扁平视图 |
 | `abox.ttl` | 人 | `onto seed` / `make seed` | 样例实例数据 |
 | `rules/*.rules` | 人 | `rules-runner`（JVM） | Jena 规则；带算术的业务条件写在这里 |
+| `mapping/<source>.yaml` | 人 | `onto import`、`onto lint-mapping` | 术语映射：源列/源值 → 类、属性、关系、代码表 |
+| `mapping/irules.yaml` | 人 | `onto import` | 实体 IRI 模板——确定性，带 `{source}` 段 |
+| `mapping/glossary.md` | 人（业务评审） | 人、Agent playbook | 同一份对齐的自然语言版本 |
 
 **关键**：Agent 读到的 schema 全部来自 `schema.projection.json`，不是 `TBox.ttl`。
 投影是查询侧的扁平视图，**不含 OWL 公理，也永不喂给推理机**。
@@ -212,9 +218,11 @@ ex:contract001 a onto:Contract ;
 ```bash
 make projection        # 1. 重新生成投影
 make lint-projection   # 2. 确认投影与 TBox 一致（CI 同款）
-make unit              # 3. 单元测试（含 OWL 2 RL 构造器黑名单、SHACL 判定）
-make seed              # 4. 载入 ABox（需要 Neo4j 起着）
-make e2e               # 5. 全部 CQ 比对 sample_result
+make lint-mapping      # 3. 确认每份 mapping 仍指向存活的术语
+make unit              # 4. 单元测试（含 OWL 2 RL 构造器黑名单、SHACL 判定）
+make seed              # 5. 载入 ABox（需要 Neo4j 起着）
+make infer             # 6. 构建派生层
+make e2e               # 7. 全部 CQ 比对 sample_result
 ```
 
 一键：
@@ -234,6 +242,7 @@ make demo              # = up + seed + e2e
 | SHACL 校验样例 ABox | 样例数据脏 | `tests/unit/test_validate.py` |
 | `uses` ⊆ 投影 | 查询引用已删的类/属性 | `Catalog.load` 加载期抛错 |
 | 全部 CQ 比对 `sample_result` | 本体变更打断查询 | `tests/e2e/test_demo.py` |
+| `make lint-mapping` | mapping 引用了已删的类/属性，或未知的代码表/目标记录 | `validate_mapping` |
 
 ---
 
@@ -244,9 +253,11 @@ make demo              # = up + seed + e2e
 3. 改 `manifest.json`：`namespace` 改掉，`queries` 逐条重写
 4. 改/增 `queries/*.cypher`：文件名对上 `name`
 5. 改 `abox.ttl`：换成你的样例实例（或留空，只用 MCP 写入工具造数据）
-6. `make projection && make lint-projection`
-7. `make seed && make e2e`
-8. CI 绿了再提交 `schema.projection.json`
+6. 为每个外部系统写 `mapping/<source>.yaml`，跑 `make lint-mapping`
+7. `make projection && make lint-projection`
+8. `make seed && make infer && make e2e`
+9. 跑一次导入：`onto import --source <source> --adapter <module>`
+10. CI 绿了再提交 `schema.projection.json`
 
 ---
 
@@ -548,3 +559,107 @@ get_inference_status()
 ---
 
 上面四条以前是「v1 跑不了」的缺口。现在都能跑了；到期那条按上面说的走查询，不走派生。
+
+---
+
+## 14. 从业务系统批量导入（`onto import`）
+
+Plan 3 加了第二条入口：`onto import` 通过 mapping 从外部系统（ERP / MES / WMS）导入一批
+数据，而不是一笔笔 `upsert` 或整份 Turtle。整批数据走与 MCP 工具**相同的表示写入器和
+写时 SHACL**，因此导入的数据与工具写出的数据无法区分。
+
+### 14.1 adapter 边界
+
+adapter 是 `ontology/` 之外的用户代码。它只有两个方法，不做任何本体工作——只拉取和拍平：
+
+```python
+class SourceAdapter(Protocol):
+    def snapshot(self) -> SourceSnapshot: ...        # source_id, snapshot_time, version
+    def iter_records(self) -> Iterator[Record]: ...  # record_type, 扁平 {field: value}
+```
+
+仓库自带一个读 Odoo 快照的参考 adapter：`examples/odoo_adapter.py` +
+`examples/odoo_records.json`（3 个客户、2 张订单）。
+
+### 14.2 `mapping/<source>.yaml`
+
+```yaml
+source: odoo
+version: 1
+records:
+  customer:
+    class: "https://example.org/onto#Customer"
+    iri: {keys: [partner_id]}
+    properties:
+      - {field: name, predicate: "https://example.org/onto#hasName", datatype: xsd:string}
+  contract:
+    class: "https://example.org/onto#Contract"
+    iri: {keys: [order_id]}
+    properties:
+      - {field: amount_total, predicate: "https://example.org/onto#hasAmount",
+         datatype: xsd:decimal}
+      - {field: commitment_date, predicate: "https://example.org/onto#hasEndDate",
+         datatype: xsd:dateTime, format: "%Y-%m-%d %H:%M:%S"}
+    relations:
+      - {field: partner_id, predicate: "https://example.org/onto#belongsToCustomer",
+         target_record: customer}
+code_tables: {}
+```
+
+规则：
+
+1. `class` **或** `class_by_field` + `class_values`——二选一。
+2. 关系写 `code_table:`（枚举个体）或 `target_record:`（外键到另一条记录的 IRI）——
+   不能同时写，且必须写一个。
+3. 没写进 mapping 的源字段一律丢弃。桥绝不凭空造属性。
+4. `onto lint-mapping` 会拿每个引用的类/属性去 `schema.projection.json` 核对，同时检查
+   代码表与目标记录名。TBox 变更后必须跑；它也是 CI 门禁。
+
+### 14.3 `mapping/irules.yaml`
+
+```yaml
+base: "https://example.org/id"
+template: "{base}/{source}/{record_type}/{key}"
+key_join: "-"
+```
+
+`{source}` 段保证今天全局唯一、将来接第二个源时可合并。`--base-iri` 覆盖 base；否则
+设置了 `FEOMCP_BASE_IRI` 时取环境变量。
+
+### 14.4 强转
+
+`xsd:string`、`xsd:integer`、`xsd:decimal`、`xsd:boolean`、`xsd:dateTime`、`xsd:date`
+（后两者可带 `format:`）。转不动的值跳过该记录。**强转只发生在导入路径**——Agent
+`upsert` 必须送已经正确类型的值。
+
+### 14.5 跑起来
+
+```bash
+make lint-mapping
+.venv/bin/python -m feomcp.cli import \
+  --source odoo --adapter examples.odoo_adapter --actor alice
+# import ingest-1a2b3c4d5e6f: 5 written, 0 skipped of 5
+```
+
+### 14.6 审计行告诉我们什么
+
+每次尝试一条 `:IngestJob`，只追加：
+
+```cypher
+MATCH (j:IngestJob)
+RETURN j.job_id, j.source_id, j.snapshot_time, j.status,
+       j.total, j.succeeded, j.failed, j.error_details
+ORDER BY j.imported_at DESC
+```
+
+同一批写入产生的字段级变更带 `actor = "ingest:<job_id>"`，因此 `list_changes(iri)`
+能回答「这份合同是哪次导入改的」。
+
+### 14.7 失败行为
+
+| 情况 | 结果 |
+|---|---|
+| 记录缺主键、未知 record_type、代码表 miss、强转失败 | 跳过该记录，计入 `failed`，原因进 `error_details`；整批继续 |
+| SHACL 拒绝整批、超 `FEOMCP_MAX_BATCH`、adapter/驱动抛错 | 什么都不写；`:IngestJob(failed)` 记录原因 |
+
+成功的导入把 ABox 与 `:IngestJob(ok)` 写在同一个事务里。
