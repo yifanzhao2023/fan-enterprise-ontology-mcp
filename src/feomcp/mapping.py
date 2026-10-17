@@ -31,7 +31,10 @@ class PropertyMap:
 class RelationMap:
     field: str
     predicate: str
-    code_table: str
+    # exactly one: a code table (enum individual) or another record type
+    # whose IRI is built from this field (a foreign key)
+    code_table: str | None = None
+    target_record: str | None = None
 
 
 @dataclass(frozen=True)
@@ -99,7 +102,8 @@ def load_mapping(path: Path) -> Mapping:
                 RelationMap(
                     field=r["field"],
                     predicate=r["predicate"],
-                    code_table=r["code_table"],
+                    code_table=r.get("code_table"),
+                    target_record=r.get("target_record"),
                 )
                 for r in (spec.get("relations") or ())
             ),
@@ -283,18 +287,41 @@ def apply_record(
     for rel in spec.relations:
         if rel.field not in record.fields:
             raise RecordError(f"{record.record_type}: missing field {rel.field!r}")
-        table = mapping.code_tables.get(rel.code_table)
-        if table is None:
-            raise RecordError(
-                f"{record.record_type}: unknown code_table {rel.code_table!r}"
-            )
         raw = record.fields[rel.field]
-        target = table.values.get(str(raw))
-        if target is None:
-            raise RecordError(
-                f"{record.record_type}: {rel.code_table}={raw!r} has no mapping"
+        if rel.code_table is not None:
+            table = mapping.code_tables.get(rel.code_table)
+            if table is None:
+                raise RecordError(
+                    f"{record.record_type}: unknown code_table {rel.code_table!r}"
+                )
+            target = table.values.get(str(raw))
+            if target is None:
+                raise RecordError(
+                    f"{record.record_type}: {rel.code_table}={raw!r} has no mapping"
+                )
+            relations.append(Relation(iri, rel.predicate, target))
+            code_nodes.setdefault(target, Entity(iri=target, types=(table.class_,)))
+            continue
+        if rel.target_record is not None:
+            target_spec = mapping.records.get(rel.target_record)
+            if target_spec is None:
+                raise RecordError(
+                    f"{record.record_type}: unknown target_record {rel.target_record!r}"
+                )
+            if len(target_spec.iri_keys) != 1:
+                raise RecordError(
+                    f"{record.record_type}: target_record {rel.target_record!r} "
+                    "needs exactly one IRI key"
+                )
+            target = build_iri(
+                irules, source=mapping.source,
+                record_type=rel.target_record, key_values=[raw],
             )
-        relations.append(Relation(iri, rel.predicate, target))
-        code_nodes.setdefault(target, Entity(iri=target, types=(table.class_,)))
+            relations.append(Relation(iri, rel.predicate, target))
+            continue
+        raise RecordError(
+            f"{record.record_type}: relation {rel.field!r} needs code_table "
+            "or target_record"
+        )
 
     return Entity(iri=iri, types=(class_iri,), properties=properties), relations, list(code_nodes.values())

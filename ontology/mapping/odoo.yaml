@@ -1,0 +1,36 @@
+# Odoo is the reference source: one system whose partner/order tables exercise
+# the same shapes an ERP, MES or WMS adapter would emit.
+source: odoo
+version: 1
+
+records:
+  customer:
+    class: "https://example.org/onto#Customer"
+    iri:
+      keys: [partner_id]
+    properties:
+      - field: name
+        predicate: "https://example.org/onto#hasName"
+        datatype: xsd:string
+
+  contract:
+    class: "https://example.org/onto#Contract"
+    iri:
+      keys: [order_id]
+    properties:
+      - field: amount_total
+        predicate: "https://example.org/onto#hasAmount"
+        datatype: xsd:decimal
+      - field: state
+        predicate: "https://example.org/onto#hasStatus"
+        datatype: xsd:string
+      - field: commitment_date
+        predicate: "https://example.org/onto#hasEndDate"
+        datatype: xsd:dateTime
+        format: "%Y-%m-%d %H:%M:%S"
+    relations:
+      - field: partner_id
+        predicate: "https://example.org/onto#belongsToCustomer"
+        target_record: customer
+
+code_tables: {}

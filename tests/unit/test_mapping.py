@@ -265,3 +265,45 @@ def test_apply_record_no_code_nodes_when_no_relations(tmp_path):
         m, IRULES, Record("business_document", {"doc_id": "7", "doc_kind": "contract"})
     )
     assert relations == [] and code_entities == []
+
+
+# --- Task 7: foreign keys to another record's IRI ----------------------------
+
+def test_apply_record_foreign_key_relation(tmp_path):
+    m = _doc_mapping(tmp_path)
+    m.records  # mapping has customer + business_document
+    # a document that belongs to a customer by id
+    text = DOC_MAPPING.replace(
+        "    class_by_field: doc_kind\n",
+        "    class_by_field: doc_kind\n"
+        "    relations:\n"
+        "      - {field: customer_id, predicate: \"https://example.org/onto/belongsToCustomer\", target_record: customer}\n",
+    )
+    p = tmp_path / "fk.yaml"
+    p.write_text(text, encoding="utf-8")
+    fk = load_mapping(p)
+    entity, relations, code_entities = apply_record(
+        fk, IRULES, Record("business_document", {
+            "doc_id": "7", "doc_kind": "contract", "customer_id": "42",
+        })
+    )
+    assert entity.iri == "https://example.org/id/erp/business_document/7"
+    assert len(relations) == 1
+    assert relations[0].target_iri == "https://example.org/id/erp/customer/42"
+    assert code_entities == []
+
+
+def test_apply_record_relation_needs_code_table_or_target_record(tmp_path):
+    text = DOC_MAPPING.replace(
+        "    class_by_field: doc_kind\n",
+        "    class_by_field: doc_kind\n"
+        "    relations:\n"
+        "      - {field: customer_id, predicate: \"https://example.org/onto/belongsToCustomer\"}\n",
+    )
+    p = tmp_path / "bad.yaml"
+    p.write_text(text, encoding="utf-8")
+    bad = load_mapping(p)
+    with pytest.raises(RecordError):
+        apply_record(bad, IRULES, Record("business_document", {
+            "doc_id": "7", "doc_kind": "contract", "customer_id": "42",
+        }))
