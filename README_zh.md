@@ -61,7 +61,7 @@ Agent 读取本体 Schema、查询命名能力问题或裸 Cypher、写入经过
 **适用用户**
 
 - **知识工程师 / 本体工程师**：能读写 Turtle、SHACL shapes、Jena rules。TBox 在 Git，由人负责。
-- **Agent 应用开发者**：在 Claude Code、Codex 或自研 MCP 客户端上，需要结构化业务事实而非文本检索。
+- **Agent 应用开发者**：在任何 MCP 兼容客户端上，需要结构化业务事实而非文本检索。
 - **数据治理 / 主数据团队**：需要可审计、带约束校验的业务事实，且违规要能回报。
 - **平台 / 基础架构工程师**：已有 Neo4j 运维能力，能跑一个 JVM 侧批处理作业。
 
@@ -98,7 +98,7 @@ Agent 读取本体 Schema、查询命名能力问题或裸 Cypher、写入经过
 | 1   | MCP server（Python）                             | schema 供给、查询目录、裸 Cypher、受控写入、写时 SHACL Core                         |
 | 2   | `onto infer`（Python CLI） + `rules-runner`（JVM） | 编排导出 → 调 JVM 推理 → 校验 → 回写。**JVM 侧不持 Neo4j 驱动、不持 DB 凭据、无写权限**，只读写文件 |
 | 3   | `ontology/`（Git）                               | TBox、shapes、rules、查询目录、schema 投影（生成物，CI 门禁）                        |
-| 4   | Skills + MCP prompts                           | Claude Code skill 包调用习惯；Codex 读 MCP prompts/resources              |
+| 4   | MCP resources + prompts（+ 可选 skill）           | resources 与 prompts 对每个客户端都承载 playbook；可选的调用习惯包装放在 `skills/` |
 | 5   | `onto import`（Python CLI）                      | adapter → mapping / IRI / 强转 → 与工具相同的表示写入器和写时 SHACL；每次尝试追加一条 `:IngestJob` |
 
 
@@ -378,25 +378,14 @@ ontology://schema     完整投影（大，仅人工查阅，永不进 prompt）
 - `query-playbook` —— 读 schema → 选命名查询 → 裸 Cypher 兜底 → 错误重试
 - `write-playbook` —— 写入结构、校验失败怎么改、派生事实何时更新
 
-### Claude Code 与 Codex 分工
+### MCP 客户端兼容性
 
+工具在任何支持 MCP stdio 的客户端里都能用。**知识落在 MCP resource 与 prompt**
+（至少 `ontology://playbook`）：会读它们的客户端直接拿到决策树、错误表与写入规则；
+只暴露工具的客户端也具备回答问题与写入数据所需的一切。
 
-| 载体                 | Claude Code | Codex  | 内容              |
-| ------------------ | ----------- | ------ | --------------- |
-| MCP tools          | 用           | 用      | 能力本身            |
-| MCP resources      | 用           | 看实现    | playbook、schema |
-| MCP prompts        | 用           | 看实现    | 两个 playbook     |
-| Claude Code skills | 用           | **不用** | 调用习惯包装          |
-
-
-**知识落在 MCP resource 与 prompt**（至少 `ontology://playbook`）。skill 只是薄壳——**不要在 skill 里复述 playbook**，否则两边必然漂移。否则 Codex 拿到一堆裸工具，没人告诉它「先 `search_schema`，再 `list_queries`，最后才 `query_raw`」。
-
-skill（`skills/feomcp/SKILL.md`）承载触发条件、操作顺序，以及 Claude Code 特有、不可跨客户端的那些习惯。安装：
-
-```bash
-mkdir -p .claude/skills && cp -r skills/feomcp .claude/skills/   # 本项目
-cp -r skills/feomcp ~/.claude/skills/                            # 所有项目
-```
+支持 skill 包的客户端可以使用 `skills/` 下可选的调用习惯包装。它只是薄壳——
+**不要在 skill 里复述 playbook**，否则两边必然漂移。
 
 ---
 
@@ -476,11 +465,19 @@ make lint-mapping                      # 全部 mapping 对照 schema 投影
 `examples/odoo_records.json` 是快照 fixture（3 个客户、2 张订单），演示不需要真 Odoo。
 生产部署把读 JSON 换成 Odoo 的 XML-RPC `execute_kw` 或 JSON-2 API，adapter 的两个方法不变。
 
-### 注册进 coding agent
+### 注册进 MCP 客户端
 
-server 走 MCP stdio。命令是 venv 里的 console script——**用绝对路径**，agent 的环境不会激活你的 venv。
+server 走 MCP stdio。把任何 MCP 客户端指向 venv 里的 console script——**用绝对路径**，
+客户端的环境不会激活你的 venv。
 
-**Claude Code** —— 项目根目录 `.mcp.json`：
+| 配置项 | 值 |
+|---|---|
+| 传输 | `stdio` |
+| 命令 | `/绝对路径/.venv/bin/feomcp`（等价 `python -m feomcp.server`） |
+| 参数 | 无 |
+| 环境变量 | `FEOMCP_ONTOLOGY_DIR`、`FEOMCP_NEO4J_URI`、`FEOMCP_NEO4J_USER`、`FEOMCP_NEO4J_PASSWORD`、`FEOMCP_NEO4J_WRITE_USER`、`FEOMCP_NEO4J_WRITE_PASSWORD` |
+
+最小注册长这样；外层键名各客户端不同，但命令、参数与环境变量不变：
 
 ```json
 {
@@ -500,23 +497,6 @@ server 走 MCP stdio。命令是 venv 里的 console script——**用绝对路�
   }
 }
 ```
-
-或 `claude mcp add feomcp -- /绝对路径/.venv/bin/feomcp`。
-
-**Codex** —— `~/.codex/config.toml`：
-
-```toml
-[mcp_servers.feomcp]
-command = "/绝对路径/.venv/bin/feomcp"
-
-[mcp_servers.feomcp.env]
-FEOMCP_ONTOLOGY_DIR = "/绝对路径/ontology"
-FEOMCP_NEO4J_URI = "bolt://localhost:7687"
-FEOMCP_NEO4J_USER = "reader"
-FEOMCP_NEO4J_PASSWORD = "…"
-```
-
-**其它 MCP 客户端** —— stdio 传输，命令 `feomcp`（等价 `python -m feomcp.server`）。
 
 > 查询账号与写入账号相同时 server 拒绝启动。给查询账号只授 `MATCH` 权限，或开发期设
 > `FEOMCP_ALLOW_SHARED_ACCOUNT=1`。

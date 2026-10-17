@@ -61,7 +61,7 @@ This project does not build a modeling environment. It makes a human-authored on
 **Who this is for**
 
 - **Knowledge / ontology engineers** who can author and maintain Turtle, SHACL shapes, and Jena rules. The TBox lives in Git and is human-owned.
-- **Agent builders** on Claude Code, Codex, or a custom MCP client who need structured business facts rather than text retrieval.
+- **Agent builders** on any MCP-compatible client who need structured business facts rather than text retrieval.
 - **Data governance / MDM teams** that need auditable, constraint-checked business facts with violations reported back.
 - **Platform engineers** who already operate Neo4j and can run a JVM-side batch job.
 
@@ -98,7 +98,7 @@ This project does not build a modeling environment. It makes a human-authored on
 | 1   | MCP server (Python)                              | Schema supply, query catalog, raw Cypher, controlled writes, write-time SHACL Core                                                                  |
 | 2   | `onto infer` (Python CLI) + `rules-runner` (JVM) | Orchestrates export → JVM inference → validate → apply. **The JVM side holds no Neo4j driver, no DB credentials, and no write access** — files only |
 | 3   | `ontology/` (Git)                                | TBox, shapes, rules, query catalog, schema projection (generated, CI-gated)                                                                         |
-| 4   | Skills + MCP prompts                             | Claude Code skill wraps invocation habits; Codex reads MCP prompts/resources                                                                        |
+| 4   | MCP resources + prompts (+ optional skill)       | Resources and prompts carry the playbook for every client; an optional invocation-habit wrapper ships under `skills/`                                |
 | 5   | `onto import` (Python CLI)                       | Adapter -> mapping / IRI / coercion -> the same representation writer and write-time SHACL; appends one `:IngestJob` per attempt                     |
 
 
@@ -391,29 +391,17 @@ ontology://schema     Full projection (large; human reference only, never into a
 - `query-playbook` — read schema → pick a named query → fall back to raw Cypher → retry on error
 - `write-playbook` — write structure, how to fix validation failures, when derived facts update
 
-### Claude Code vs. Codex
+### MCP client compatibility
 
+The tools work in any client that speaks MCP over stdio. **Knowledge lives in MCP
+resources and prompts** (at minimum `ontology://playbook`): a client that reads them
+gets the decision tree, the error table and the write rules with no extra setup; a
+client that only surfaces tools still has everything needed to answer questions and
+write data.
 
-| Carrier            | Claude Code | Codex                    | Content                       |
-| ------------------ | ----------- | ------------------------ | ----------------------------- |
-| MCP tools          | yes         | yes                      | The capabilities themselves   |
-| MCP resources      | yes         | implementation-dependent | playbook, schema              |
-| MCP prompts        | yes         | implementation-dependent | the two playbooks             |
-| Claude Code skills | yes         | **no**                   | Invocation-habit wrapper only |
-
-
-**Knowledge lives in MCP resources and prompts** (at minimum `ontology://playbook`).
-A skill is a thin wrapper — it must not restate the playbook, or the two will drift.
-Otherwise Codex gets bare tools and nothing tells it "call `search_schema` first,
-then `list_queries`, and only then `query_raw`".
-
-The skill (`skills/feomcp/SKILL.md`) carries the trigger conditions, the order of
-operations and the Claude Code habits that are not client-agnostic. Install it:
-
-```bash
-mkdir -p .claude/skills && cp -r skills/feomcp .claude/skills/   # this project
-cp -r skills/feomcp ~/.claude/skills/                            # every project
-```
+An optional invocation-habit wrapper ships under `skills/` for clients that support
+skill packages. It is a thin wrapper — it must not restate the playbook, or the two
+will drift.
 
 ---
 
@@ -503,12 +491,21 @@ The batch must fit `FEOMCP_MAX_BATCH`; the loader rejects, never chunks.
 the demo needs no live Odoo. A live deployment swaps the JSON read for Odoo's
 XML-RPC `execute_kw` or JSON-2 API and keeps the same two adapter methods.
 
-### Register with a coding agent
+### Register with an MCP client
 
-The server speaks MCP over stdio. The command is the console script inside your venv —
-**use the absolute path**, because the agent's environment will not have your venv activated.
+The server speaks MCP over stdio. Point any MCP client at the console script in your
+venv — **use the absolute path**, because the client's environment will not have your
+venv activated.
 
-**Claude Code** — `.mcp.json` in the project root:
+| Setting | Value |
+|---|---|
+| Transport | `stdio` |
+| Command | `/abs/path/to/.venv/bin/feomcp` (equivalent: `python -m feomcp.server`) |
+| Arguments | none |
+| Environment | `FEOMCP_ONTOLOGY_DIR`, `FEOMCP_NEO4J_URI`, `FEOMCP_NEO4J_USER`, `FEOMCP_NEO4J_PASSWORD`, `FEOMCP_NEO4J_WRITE_USER`, `FEOMCP_NEO4J_WRITE_PASSWORD` |
+
+A minimal registration looks like this; the key names around it differ per client, but
+the command, arguments and environment do not:
 
 ```json
 {
@@ -528,24 +525,6 @@ The server speaks MCP over stdio. The command is the console script inside your 
   }
 }
 ```
-
-or `claude mcp add feomcp -- /abs/path/to/.venv/bin/feomcp`.
-
-**Codex** — `~/.codex/config.toml`:
-
-```toml
-[mcp_servers.feomcp]
-command = "/abs/path/to/.venv/bin/feomcp"
-
-[mcp_servers.feomcp.env]
-FEOMCP_ONTOLOGY_DIR = "/abs/path/to/ontology"
-FEOMCP_NEO4J_URI = "bolt://localhost:7687"
-FEOMCP_NEO4J_USER = "reader"
-FEOMCP_NEO4J_PASSWORD = "…"
-```
-
-**Any other MCP client** — stdio transport, command `feomcp` (equivalently
-`python -m feomcp.server`).
 
 > The server refuses to start when the query and write accounts are the same account.
 > Give the query account `MATCH`-only privileges, or set
