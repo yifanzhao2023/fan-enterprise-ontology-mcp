@@ -7,6 +7,7 @@ record enter?
 """
 
 from dataclasses import dataclass
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -161,6 +162,10 @@ def _matches_datatype(value: Any, datatype: Any) -> bool:
         return isinstance(value, bool)
     if name == "string":
         return isinstance(value, str)
+    if name == "dateTime":
+        return isinstance(value, datetime)
+    if name == "date":
+        return isinstance(value, date) and not isinstance(value, datetime)
     # Fail closed: a datatype we cannot check is a datatype we do not accept.
     return False
 

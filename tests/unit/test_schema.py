@@ -93,3 +93,17 @@ def test_search_reports_label_match_for_classes(tmp_path):
     assert [(h["name"], h["match"]) for h in by_label] == [("KeyContract", "label")]
     by_name = catalog.search("keycontract")
     assert [(h["name"], h["match"]) for h in by_name] == [("KeyContract", "name")]
+
+
+def test_known_terms_exposes_class_and_property_iris():
+    from feomcp.schema import SchemaCatalog
+
+    catalog = SchemaCatalog({
+        "classes": [{"name": "Customer", "iri": "https://example.org/onto/Customer"}],
+        "properties": [{"name": "hasName", "iri": "https://example.org/onto/hasName",
+                        "kind": "datatype"}],
+    })
+    assert catalog.known_terms() == {
+        "https://example.org/onto/Customer",
+        "https://example.org/onto/hasName",
+    }

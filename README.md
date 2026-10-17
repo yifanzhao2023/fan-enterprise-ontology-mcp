@@ -8,7 +8,7 @@ Agents read the ontology schema, query named competency questions or raw Cypher,
 
 **Language:** [English](README.md) · [简体中文](README_zh.md)
 
-> **Status:** v1 complete — storage, query, agent integration, offline inference and SHACL validation are all built and tested. Ontology alignment and knowledge extraction are planned, not built.
+> **Status:** v1.0.2 — storage, query, agent integration, offline inference, SHACL validation, and the mapping-driven batch ingest with lineage audit are all built and tested. Knowledge extraction is planned, not built.
 
 - **Protocol:** MCP (stdio)
 - **Language:** Python (MCP SDK) + JVM inference CLI
@@ -16,6 +16,7 @@ Agents read the ontology schema, query named competency questions or raw Cypher,
 - **Interchange:** Turtle (RDF); tool results use a JSON-LD-aligned `@context` as a business contract layer, never as an RDF exchange format
 - **Inference:** Jena rules (OWL 2 RL + business rules), offline
 - **Validation:** pySHACL (SHACL Core at write time, full SHACL offline)
+- **Ingest:** mapping artifacts in Git + `onto import` (CLI, batch-atomic), with an append-only `:IngestJob` lineage row per attempt
 - **License:** [Apache License 2.0](LICENSE)
 
 ---
@@ -29,6 +30,7 @@ Agents read the ontology schema, query named competency questions or raw Cypher,
   - [Chain A — write ABox](#chain-a--agent-writes-abox)
   - [Chain B — agent queries](#chain-b--agent-queries)
   - [Chain C — offline inference](#chain-c--offline-inference-onto-infer)
+  - [Chain D — batch ingest](#chain-d--batch-ingest-onto-import)
 - [5. Features](#5-features)
 - [6. Tools](#6-tools)
 - [7. Resources & Prompts](#7-resources--prompts)
@@ -36,10 +38,9 @@ Agents read the ontology schema, query named competency questions or raw Cypher,
 - [9. Configuration](#9-configuration)
 - [10. Quick Start](#10-quick-start)
 - [11. Security Model](#11-security-model)
-- [12. Development](#12-development)
-- [13. Testing & Acceptance](#13-testing--acceptance)
-- [14. Limitations](#14-limitations)
-- [15. Roadmap](#15-roadmap)
+- [12. Limitations](#12-limitations)
+- [13. Roadmap](#13-roadmap)
+- [Development & Testing](DEVELOPMENT.md)
 - [License](#license)
 
 ---
@@ -61,7 +62,7 @@ This project does not build a modeling environment. It makes a human-authored on
 **Who this is for**
 
 - **Knowledge / ontology engineers** who can author and maintain Turtle, SHACL shapes, and Jena rules. The TBox lives in Git and is human-owned.
-- **Agent builders** on Claude Code, Codex, or a custom MCP client who need structured business facts rather than text retrieval.
+- **Agent builders** on any MCP-compatible client who need structured business facts rather than text retrieval.
 - **Data governance / MDM teams** that need auditable, constraint-checked business facts with violations reported back.
 - **Platform engineers** who already operate Neo4j and can run a JVM-side batch job.
 
@@ -77,7 +78,7 @@ This project does not build a modeling environment. It makes a human-authored on
 
 - The task is document Q&A over unstructured text — use a vector store / RAG.
 - You only need entity-relation storage with no axioms or constraints — a property graph with a light schema is cheaper.
-- You need ontology alignment or knowledge extraction from source systems — out of v1 scope (see [Roadmap](#15-roadmap)).
+- You need knowledge extraction from text or multi-source entity resolution — planned. Terminology mapping and batch ingest for structured sources shipped in Plan 3.
 - You need online OWL DL reasoning at request time — inference here is offline and batch.
 - You have no JVM and cannot install Java — `onto infer` requires one.
 - You need graphical ontology modeling — use Protégé. This project deliberately does not model.
@@ -98,7 +99,8 @@ This project does not build a modeling environment. It makes a human-authored on
 | 1   | MCP server (Python)                              | Schema supply, query catalog, raw Cypher, controlled writes, write-time SHACL Core                                                                  |
 | 2   | `onto infer` (Python CLI) + `rules-runner` (JVM) | Orchestrates export → JVM inference → validate → apply. **The JVM side holds no Neo4j driver, no DB credentials, and no write access** — files only |
 | 3   | `ontology/` (Git)                                | TBox, shapes, rules, query catalog, schema projection (generated, CI-gated)                                                                         |
-| 4   | Skills + MCP prompts                             | Claude Code skill wraps invocation habits; Codex reads MCP prompts/resources                                                                        |
+| 4   | MCP resources + prompts (+ optional skill)       | Resources and prompts carry the playbook for every client; an optional invocation-habit wrapper ships under `skills/`                                |
+| 5   | `onto import` (Python CLI)                       | Adapter -> mapping / IRI / coercion -> the same representation writer and write-time SHACL; appends one `:IngestJob` per attempt                     |
 
 
 > **`ontology/` ships a worked example, not your ontology.** The files here model
@@ -118,18 +120,20 @@ This project does not build a modeling environment. It makes a human-authored on
 | Git `TBox.ttl` / `shapes.ttl` / `rules/` | Authoritative ontology and rules                                                                                                                                  | Human (Protégé / LLM + review)                      |
 | Git `schema.projection.json`             | Flat **query-side projection** — classes, properties, relations, cardinality, core constraints. **Not the full set of OWL axioms, and never fed to the reasoner** | CI runs `onto project`; `git diff --exit-code` gate |
 | Git `queries/*.cypher` + `manifest.json` | Query catalog = Competency Question set                                                                                                                           | Human + CI gate                                     |
+| Git `mapping/*.yaml` + `irules.yaml` + `glossary.md` | Terminology mapping, IRI rule and human glossary — the import data contract                                                                | Human, reviewed with the TBox                       |
 | Neo4j ABox                               | Instances                                                                                                                                                         | MCP controlled ingest (agent-writable)              |
 | Neo4j `:INFERRED` / `{inferred:true}`    | Derived types and derived relations                                                                                                                               | `onto infer` batch job                              |
 | Neo4j `:ConstraintViolation`             | Offline SHACL violations, linked to the offending instance                                                                                                        | Same batch job, cleared and rebuilt                 |
+| Neo4j `:IngestJob`                       | Append-only import lineage: source, snapshot time, actor, counts, error details                                                                                    | `onto import`, one node per attempt                 |
 
 
-**Three semantic node classes in Neo4j.** No TBox nodes, no schema nodes.
+**Three semantic node classes in Neo4j**, plus append-only audit rows (`:ChangeEvent`, `:InferenceJob`, `:IngestJob`). No TBox nodes, no schema nodes.
 
 ### Modeling contract
 
 > v1 TBox is locked to the **Jena OWL 2 RL subset**. Do not introduce OWL DL constructs beyond RL. **Arithmetic business conditions live in Jena Rules, never in TBox axioms.**
 
-This is checked mechanically in CI (see [Testing & Acceptance](#13-testing--acceptance)). It also settles reasoner selection: within RL, Jena rules is complete — no ELK, no HermiT in v1.
+This is checked mechanically in CI (see [CI gates](ontology/README.md#9-ci-gates)). It also settles reasoner selection: within RL, Jena rules is complete — no ELK, no HermiT in v1.
 
 ---
 
@@ -217,6 +221,63 @@ Between a write and the next `onto infer`, `:INFERRED` is stale. Three places ha
 - `replace_derived` writes a **singleton metadata node** (`job_id`, `finished_at`, input counts, derived count, violation count) so agents can ask how fresh the derived layer is. One node — not a fourth semantic class.
 - Trigger cadence is an ops decision. Docs suggest a default (hourly, or debounced N minutes after writes); nothing is hard-coded.
 
+### Chain D — batch ingest (`onto import`)
+
+![Chain D — batch ingest](misc/diagrams/chain-d.gif)
+
+Real enterprise data lives in ERP / MES / WMS systems, not in Turtle. `onto import`
+runs one batch through the same representation writer and write-time SHACL check as
+the agent tools, so imported facts and tool-written facts are indistinguishable.
+
+```
+external system
+   |  SourceAdapter (user code: fetch + flatten only)
+   v
+Record(record_type, {field: value}) + SourceSnapshot(source_id, snapshot_time)
+   |
+   v  onto import --source <id> --adapter <module>
+mapping/<source>.yaml   -> class, properties, relations, code tables
+mapping/irules.yaml     -> entity IRI, deterministic, with a {source} segment
+datatype coercion       -> string / integer / decimal / boolean / dateTime / date
+   |
+   v
+WriteBatch -> FactStore.ingest
+   |-- representation writer + write-time SHACL Core (same as the tools)
+   |-- :ChangeEvent field-level log, actor = "ingest:<job_id>"
+   `-- :IngestJob(ok) in the same transaction
+```
+
+**The adapter boundary is deliberately dumb.** An adapter only fetches and flattens.
+Types, predicates, coercion, IRI construction and validation all belong to the bridge
+— that is what lets the mapping live in Git and be replayed.
+
+**Two failure classes:**
+
+- **Record-level** — missing key, unknown record type, unmapped code-table value, or
+  a coercion failure. The record is skipped, counted in `failed`, and its reason goes
+  into `error_details`. One dirty row never blocks an ERP extract.
+- **Batch-level** — SHACL rejection, batch-size overflow, adapter or driver error.
+  Nothing is written; an append-only `:IngestJob(failed)` records why.
+
+Invariant: a successful import always leaves both the ABox write and
+`:IngestJob(ok)` in one transaction; a failed one leaves the ABox untouched and only
+the failed job row.
+
+**Lineage.** `:IngestJob` is append-only, one node per attempt:
+
+| Field | Meaning |
+|---|---|
+| `job_id` | attempt identity (unique, never reused) |
+| `input_hash` | content identity: source + snapshot time + mapping + IRI-rule digests |
+| `source_id` / `source_version` / `snapshot_time` | where the data came from |
+| `actor` / `imported_at` | who ran it, and when |
+| `status` / `total` / `succeeded` / `failed` / `error_details` | what happened |
+| `mapping_ref` | which mapping version drove it |
+
+Field-level changes recorded by the same batch carry `actor = "ingest:<job_id>"`, so
+"what did this import change" is one query away. Batch atomicity is the same rule as
+Chain A: one import = one transaction; an oversized extract is rejected, not chunked.
+
 ### Known risk
 
 `materialize_rdf` memory on large instance exports. The exporter loads the whole graph into one rdflib model; if a real instance set shows pressure, the fallback is a per-label partitioned export feeding the JVM multiple files. The contract assumes a single `abox.ttl` for now.
@@ -248,6 +309,29 @@ Agents write instances through structured parameters. There is no Cypher write p
 
 Jena rules produce derived types and derived relations. They are materialized into Neo4j under an explicit marker and rebuilt wholesale per job, never mixed into the ABox.
 
+### Terminology mapping (Plan 3)
+
+A mapping is a data contract, not code: `ontology/mapping/<source>.yaml` maps source
+columns to properties, source values to classes, and code tables to enum individuals.
+It lives in Git, is reviewed like code, and `onto lint-mapping` rejects references to
+terms the projection no longer has. A companion `glossary.md` gives business reviewers
+the same alignment in plain language.
+
+### Batch ingest bridge (Plan 3)
+
+`onto import` turns adapter records into `WriteBatch`es through the mapping, a
+deterministic IRI rule, and datatype coercion. It reuses the MCP write path's
+representation writer and write-time SHACL check, so imported and tool-written data
+cannot drift. Sources are adapters — user code that only fetches and flattens — so
+adding an ERP / MES / WMS needs no core change.
+
+### Ingest lineage audit (Plan 3)
+
+Every import attempt appends an `:IngestJob` node with source, snapshot time, trigger,
+counts and error details. Both success and failure are recorded and the node is never
+overwritten, so retries leave history. Field-level `:ChangeEvent` rows back-link to
+the job through `actor`.
+
 ### Violation reporting
 
 Offline SHACL violations land in Neo4j as `:ConstraintViolation` nodes linked to the offending instance, so an agent can answer "what is wrong with this record" — not just "is something wrong".
@@ -274,6 +358,8 @@ Ten tools, five groups.
 
 
 **There is no `load_ontology` tool.** The TBox is loaded through Git, not through MCP. That is a direct consequence of "TBox authoritative source is Git" — it removes a whole tool group and a whole attack surface.
+
+**There is no ingest tool either.** Bulk import is `onto import` on the CLI, so an agent cannot trigger a large write by accident.
 
 ### Tool contract
 
@@ -306,29 +392,18 @@ ontology://schema     Full projection (large; human reference only, never into a
 - `query-playbook` — read schema → pick a named query → fall back to raw Cypher → retry on error
 - `write-playbook` — write structure, how to fix validation failures, when derived facts update
 
-### Claude Code vs. Codex
+### MCP client compatibility
 
+The tools work in any client that speaks MCP over stdio. **Knowledge lives in MCP
+resources and prompts** (at minimum `ontology://playbook`): a client that reads them
+gets the decision tree, the error table and the write rules with no extra setup; a
+client that only surfaces tools still has everything needed to answer questions and
+write data.
 
-| Carrier            | Claude Code | Codex                    | Content                       |
-| ------------------ | ----------- | ------------------------ | ----------------------------- |
-| MCP tools          | yes         | yes                      | The capabilities themselves   |
-| MCP resources      | yes         | implementation-dependent | playbook, schema              |
-| MCP prompts        | yes         | implementation-dependent | the two playbooks             |
-| Claude Code skills | yes         | **no**                   | Invocation-habit wrapper only |
-
-
-**Knowledge lives in MCP resources and prompts** (at minimum `ontology://playbook`).
-A skill is a thin wrapper — it must not restate the playbook, or the two will drift.
-Otherwise Codex gets bare tools and nothing tells it "call `search_schema` first,
-then `list_queries`, and only then `query_raw`".
-
-The skill (`skills/feomcp/SKILL.md`) carries the trigger conditions, the order of
-operations and the Claude Code habits that are not client-agnostic. Install it:
-
-```bash
-mkdir -p .claude/skills && cp -r skills/feomcp .claude/skills/   # this project
-cp -r skills/feomcp ~/.claude/skills/                            # every project
-```
+A client-neutral instruction sheet ships under `skills/feomcp/`: skill-aware clients
+can load it as a skill, and any other client can paste it into the agent's system
+instructions. It is a thin wrapper — it must not restate the playbook, or the two
+will drift.
 
 ---
 
@@ -372,10 +447,10 @@ CI fails when it is stale.
 
 > **`ontology/` is a sample, not your ontology.**
 > It holds a runnable domain — enterprise contract management — so the server starts
-> out of the box and CI has something to regress against. It exercises six common
+> out of the box and CI has something to regress against. It exercises seven common
 > situations on purpose: term disambiguation, named queries, multi-hop org traversal,
-> a legal write, an illegal write, and a security boundary. Replace all of it with
-> your own data before you use this for real. See
+> a legal write, an illegal write, a security boundary, and a batch import from an ERP.
+> Replace all of it with your own data before you use this for real. See
 > [`ontology/README.md`](ontology/README.md) for how.
 
 ### Load the sample data(Optional)
@@ -402,12 +477,50 @@ transaction. Check `get_inference_status()` before answering from a derived fact
 `stale: true` means something has been written since the last run. See
 [`ontology/README.md`](ontology/README.md) section 13 for the scenarios that need it.
 
-### Register with a coding agent
+### Import from an external system (optional)
 
-The server speaks MCP over stdio. The command is the console script inside your venv —
-**use the absolute path**, because the agent's environment will not have your venv activated.
+Sources are adapters you write outside the package; the repo ships one reference
+adapter over an Odoo snapshot:
 
-**Claude Code** — `.mcp.json` in the project root:
+```bash
+make lint-mapping                      # every mapping against the schema projection
+.venv/bin/python -m feomcp.cli import \
+  --source odoo --adapter examples.odoo_adapter --actor alice
+```
+
+The batch must fit `FEOMCP_MAX_BATCH`; the loader rejects, never chunks.
+`examples/odoo_records.json` is a snapshot fixture (three customers, two orders) so
+the demo needs no live Odoo. A live deployment swaps the JSON read for Odoo's
+XML-RPC `execute_kw` or JSON-2 API and keeps the same two adapter methods.
+
+An adapter is a two-method object **you own**; there is no built-in connector to
+your business API:
+
+```python
+class SourceAdapter(Protocol):
+    def snapshot(self) -> SourceSnapshot: ...        # source_id, snapshot_time, version
+    def iter_records(self) -> Iterator[Record]: ...  # record_type, flat {field: value}
+```
+
+Fetch and flatten only — mapping, IRI construction, datatype coercion and validation
+all belong to the bridge. The full walkthrough is in
+[`ontology/README.md` §14](ontology/README.md#14-importing-from-a-business-system-onto-import).
+
+### Register with an MCP client
+
+The server speaks MCP over stdio. Point any MCP client at the console script in your
+venv — **use the absolute path**, because the client's environment will not have your
+venv activated.
+
+| Setting | Value |
+|---|---|
+| Transport | `stdio` |
+| Command | `/abs/path/to/.venv/bin/feomcp` (equivalent: `python -m feomcp.server`) |
+| Arguments | none |
+| Environment | `FEOMCP_ONTOLOGY_DIR`, `FEOMCP_NEO4J_URI`, `FEOMCP_NEO4J_USER`, `FEOMCP_NEO4J_PASSWORD`, `FEOMCP_NEO4J_WRITE_USER`, `FEOMCP_NEO4J_WRITE_PASSWORD` |
+
+A minimal registration looks like this; the key names around it differ per client, but
+the command, arguments and environment do not:
 
 ```json
 {
@@ -428,24 +541,6 @@ The server speaks MCP over stdio. The command is the console script inside your 
 }
 ```
 
-or `claude mcp add feomcp -- /abs/path/to/.venv/bin/feomcp`.
-
-**Codex** — `~/.codex/config.toml`:
-
-```toml
-[mcp_servers.feomcp]
-command = "/abs/path/to/.venv/bin/feomcp"
-
-[mcp_servers.feomcp.env]
-FEOMCP_ONTOLOGY_DIR = "/abs/path/to/ontology"
-FEOMCP_NEO4J_URI = "bolt://localhost:7687"
-FEOMCP_NEO4J_USER = "reader"
-FEOMCP_NEO4J_PASSWORD = "…"
-```
-
-**Any other MCP client** — stdio transport, command `feomcp` (equivalently
-`python -m feomcp.server`).
-
 > The server refuses to start when the query and write accounts are the same account.
 > Give the query account `MATCH`-only privileges, or set
 > `FEOMCP_ALLOW_SHARED_ACCOUNT=1` for development.
@@ -458,6 +553,10 @@ make demo
 
 Starts Neo4j, regenerates the projection, loads the sample ABox and runs every
 competency question against its expected result.
+
+For the repository layout, test layers, CI gates and the release/tag convention, see
+[DEVELOPMENT.md](DEVELOPMENT.md).
+
 ## 9. Configuration
 
 Environment variables. No config framework.
@@ -477,6 +576,7 @@ Environment variables. No config framework.
 | `FEOMCP_MAX_BATCH` | `500` | Single write batch cap |
 | `FEOMCP_REDACT_FIELDS` | *(empty)* | Comma-separated field names masked at read time |
 | `FEOMCP_ALLOW_SHARED_ACCOUNT` | `0` | `1` permits query and write to share one account (development only) |
+| `FEOMCP_BASE_IRI` | `https://example.org/id` | Base IRI for identifiers generated by `onto import`; overrides `irules.yaml` |
 
 **Privilege separation is native database accounts**, not code branches. The server keeps
 two driver sessions and routes by tool group: query tools (1–6, 9, 10) use the read-only
@@ -504,6 +604,13 @@ docker compose up -d --wait   # start Neo4j
 make seed                     # projection + load the sample ABox
 make infer                    # build the derived layer
 make e2e                      # run every CQ against its sample_result
+```
+
+Then import the reference Odoo snapshot through the mapping bridge:
+
+```bash
+make lint-mapping
+.venv/bin/python -m feomcp.cli import --source odoo --adapter examples.odoo_adapter
 ```
 
 Then point an agent at the server (see [Installation](#8-installation)) and ask a
@@ -555,6 +662,8 @@ how to replace it with your own ontology.
 | `abox.ttl` export fails                     | Same — do not apply                                                            |
 | Apply transaction fails                     | Single transaction rolls back; previous derived data intact                    |
 | Dirty git working tree                      | `onto infer` refuses; `--allow-dirty` runs and marks the metadata              |
+| Ingest record fails mapping / coercion      | Record skipped, counted in `failed`, reason in `:IngestJob.error_details`; the batch continues |
+| Ingest batch fails (SHACL / size / driver)  | Nothing written; `:IngestJob(failed)` records the cause                        |
 
 
 **"On failure, do not apply" is the core invariant.** Old derived data beats no derived data, and beats a half-built one. Any step failing leaves the graph at the last successful job's state.
@@ -567,127 +676,11 @@ how to replace it with your own ontology.
 
 ---
 
-## 12. Development
-
-### Repository layout
-
-```
-src/feomcp/           the MCP server and the offline chain
-  ports.py            QueryEngine + FactStore protocols
-  neo4j_store.py      the only adapter: driver, guard call site, representation writer
-  schema.py           reads schema.projection.json
-  catalog.py          named queries (the CQ catalog)
-  validate.py         SHACL Core at write time, full SHACL offline, TBox profile gate
-  guard.py            the Cypher trust boundary
-  server.py           tool surface — the only exit
-  cli.py              `onto project` / `onto seed` / `onto infer`
-jvm/                  rules-runner: Turtle in, delta out. No DB, no network
-ontology/             sample domain (replace it — see ontology/README.md)
-  rules/*.rules       Jena rules; arithmetic business conditions live here
-tests/                unit / integration / e2e
-```
-
-### Local development workflow
-
-```bash
-python3.12 -m venv .venv && . .venv/bin/activate
-pip install -e ".[dev]"
-
-make rules-runner     # build jvm/target/rules-runner.jar (needs JDK 17+ and Maven)
-make unit             # no dependencies
-make integration      # testcontainers, needs a running Docker daemon
-make demo             # down -v + up + seed + infer + e2e against docker-compose
-```
-
-`make integration` and `make demo` need Docker. `make unit` does not — it is the
-fast loop.
-
-### Module boundaries (design summary)
-
-Only two Python ports earn their interface — storage and query — because both have a planned second implementation. SHACL validation, projection reading, the query catalog, and the representation writer are concrete: a second implementation is not planned, and wrapping them would be tax paid to a hypothetical.
-
-**Inference is a process boundary, not a Python interface.** Its contract is file exchange (`Turtle in → inferred.ttl out`). Swapping Jena for ELK means replacing `rules-runner`; the Python orchestration layer does not change.
-
----
-
-## 13. Testing & Acceptance
-
-### Test layers
-
-
-| Layer         | Scope                                                                                                                                        | Depends on                    |
-| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
-| Unit          | `guard` (table-driven injection samples), `schema` / `catalog` parsing, `validate` Core judgments, `cli` apply logic against fake JVM output | nothing                       |
-| Integration   | `neo4j_store`: upsert atomicity, representation writer, `materialize_rdf` round-trip, `replace_derived` rebuild                              | testcontainers (Neo4j) |
-| End-to-end    | `make demo`: load sample → `onto infer` → all CQs → assert `sample_result`                                                                   | docker-compose                |
-| CQ regression | Every manifest entry runs `sample_params` against `sample_result`                                                                            | same                          |
-
-
-### CI gates (every PR)
-
-
-| Gate                                       | Catches                                          |
-| ------------------------------------------ | ------------------------------------------------ |
-| `onto project` then `git diff --exit-code` | Projection drifting from Turtle                  |
-| TBox profile check                         | OWL constructs beyond RL                         |
-| SHACL validation of sample ABox            | Dirty sample data                                |
-| `onto infer` runs                          | Broken rules                                     |
-| All CQs vs `sample_result`                 | Ontology changes breaking queries                |
-| manifest `uses` ⊆ projection               | Queries referencing deleted classes / properties |
-| Unit + integration tests                   | Code regressions                                 |
-| `make demo` full chain                     | Integration breaks                               |
-
-
-**TBox profile check**: `feomcp.validate.banned_owl_constructs` runs before the JVM is launched and rejects the five constructors the modeling contract forbids (`owl:unionOf` / `owl:complementOf` / `owl:oneOf` / `owl:hasValue` / `owl:disjointWith`). It is a blacklist lint and is named as incomplete in the code. The spec's preferred authoritative check was an OWL API `OWL2RLProfile`; Jena has no such class, so the blacklist is the implementation.
-
-### Error paths that must be tested
-
-- Every guard rule has at least one sample (including escape hatches like `apoc.cypher.run`)
-- `VALIDATION_FAILED` is field-level (shape / path / message / focus)
-- **JVM failure does not apply** — previous `:INFERRED` intact
-- Batch atomicity: half a batch invalid → nothing lands
-- Timeout / row cap triggers
-- Projection missing or invalid → refuse to start
-- Dirty git tree → `onto infer` refuses
-
-### Verified behaviours
-
-The spikes that were open at design time are resolved; each is now pinned by a test.
-
-
-| Behaviour             | What holds                                                                                                                  |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| ABox round-trip       | `materialize_rdf` re-emits every entity, type, property and relation that was written (zero diff)                            |
-| URI unique key        | the `uri` property is the entity unique key; repeated writes are idempotent; no duplicate entities                          |
-| Version compatibility | Neo4j 5.x stable for the read/write sessions and the derived-layer rebuild                                                  |
-
-The one open risk is large-instance export memory (see [Known risk](#4-how-it-works)); the sample is 18 entities, so it is untested at production scale.
-
-
-### Metrics (POC thresholds, fixed)
-
-
-| Metric                            | Threshold                                  |
-| --------------------------------- | ------------------------------------------ |
-| Named-query path success rate     | **≥ 99%**                                  |
-| Raw Cypher path syntax pass rate  | ≥ 85% (**after one retry**)                |
-| Raw Cypher execution success rate | ≥ 95%                                      |
-| Answer correctness                | ≥ 90%                                      |
-| CQ coverage                       | 100% on sample set, ≥ 90% on real ontology |
-| SHACL violation rate              | < 1%                                    |
-| Query P95                         | < 500 ms                                |
-| Write validation P95              | < 200 ms                                |
-| Schema tokens injected per call   | < 2000                                  |
-
-
-The two query paths are measured separately so the value of the query catalog is visible. If the named-query path drops below 95%, the fix is more CQs — not tuning raw Cypher.
-
----
-
-## 14. Limitations
+## 12. Limitations
 
 - No modeling UI or domain modeling DSL. Use Protégé.
-- No ontology alignment or knowledge extraction (planned).
+- Terminology mapping and batch ingest cover structured sources. Knowledge extraction from text and multi-source entity resolution are planned.
+- Ingest is snapshot-based; incremental sync is planned (P1).
 - Inference is offline and batch; derived facts are stale between runs by design.
 - TBox is restricted to the OWL 2 RL subset.
 - Query results use a JSON-LD-aligned `@context`, not strict JSON-LD. RDF interchange only happens over the file chain.
@@ -696,20 +689,23 @@ The two query paths are measured separately so the value of the query catalog is
 
 ---
 
-## 15. Roadmap
+## 13. Roadmap
 
+**Plan 3 — land real data — is complete.** Terminology mapping, the batch ingest
+bridge, and the append-only ingest lineage audit ship together and are tested.
 
-| Item                                                  | Notes                                                                                                     |
-| ----------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| Ontology alignment & knowledge extraction         | New capability module; new tools + a package, reusing `FactStore.upsert` + `validate_core`                |
-| GraphDB backend                                       | New adapter implementing `QueryEngine` / `FactStore`; tool schema unchanged; adds `submit(lang="sparql")` |
-| OWL 2 EL + ELK                                        | When the TBox outgrows RL (large class hierarchies, equivalence, existential restrictions)                |
-| Business-rule sync path (write-time rule application) | Small hand-maintained ruleset for derived facts needed immediately after a write                          |
-| Triple-level RBAC / ABAC                              | Once compliance requirements are concrete                                                                 |
-| OBDA / Ontop for relational sources                   | If data volume makes full extraction unattractive                                                         |
+Next is **P1 — from a snapshot to a living system**:
 
+| Item                     | Notes                                                                 |
+| ------------------------ | --------------------------------------------------------------------- |
+| Incremental sync         | Scheduled delta pulls through the same bridge; needs a source-side update marker |
+| Ontology version evolution | Impact report for TBox changes, then ABox migration                  |
+| Knowledge extraction     | LLM candidates from text, accepted by the ontology + SHACL, human review |
 
----
+The remaining backlog — quality dashboard, triple-level access control, multi-source
+entity resolution, write-time inference, violation history, observability, alternate
+storage backends, OBDA, OWL 2 EL + ELK — is tracked in the internal requirements
+document, not shipped.
 
 ## License
 

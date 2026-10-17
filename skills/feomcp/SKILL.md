@@ -1,6 +1,6 @@
 ---
 name: feomcp
-description: Use the enterprise ontology MCP server (feomcp) to answer business questions over contracts, customers, work orders and org structure, and to write instance data into it. Triggers when the user asks about 合同/客户/工单/部门/员工 business facts, wants to query or write enterprise ontology data, asks "which contracts…", "who reports to…", or asks to load/validate ontology files. Also triggers on /feomcp.
+description: Use the enterprise ontology MCP server (feomcp) to answer business questions over contracts, customers, work orders and org structure, and to write instance data into it. Triggers when the user asks about 合同/客户/工单/部门/员工 business facts, wants to query or write enterprise ontology data, asks "which contracts…", "who reports to…", asks to load/validate ontology files, or asks to bulk-import data from an ERP/CSV.
 ---
 
 # Using the feomcp ontology MCP
@@ -9,12 +9,20 @@ This MCP exposes an enterprise ontology as an agent semantic memory layer. It is
 not a document store and not a SQL console — the value is the **schema and the
 constraints**, so use them.
 
+This file is a plain Markdown instruction sheet. Skill-aware clients can load
+`skills/feomcp/` as a skill; any other client can paste it into the agent's system
+instructions or retrieve the same guidance through the MCP resources and prompts.
+Nothing in it depends on a particular client.
+
 ## Before anything else
 
 Read `ontology://playbook` from the MCP resources. It is the authoritative
-decision tree, error table and write rules. This skill is only a wrapper: **do not
+decision tree, error table and write rules. This file is only a wrapper: **do not
 restate the playbook here, and do not assume its content** — if the playbook and
 this file ever disagree, the playbook wins.
+
+If your client does not expose resources, load this file as instructions instead;
+it carries the order of operations and the non-negotiables.
 
 The two prompts `query-playbook` and `write-playbook` carry the same text through
 the prompt channel.
@@ -37,7 +45,7 @@ the prompt channel.
 3. Read it back with a named query. `applied: true` says the transaction committed,
    not that the graph looks the way you meant it to.
 
-## Claude Code specifics
+## Client etiquette
 
 - Do not reach for the Neo4j driver, `cypher-shell`, or a bash pipe to the database.
   Everything goes through the MCP tools, so the guard and the audit log apply.
@@ -49,11 +57,45 @@ the prompt channel.
 - If a tool returns `retryable: false`, **change the request** — do not resend it.
   `QUERY_REJECTED` is a safety rejection, not a transient failure.
 
+## Bulk import is CLI-only
+
+`onto import` is **not an MCP tool**. Do not emulate it with a flood of `upsert_*`
+calls — the batch would lose lineage and could trip the batch cap.
+
+When the user wants to load data from an ERP / MES / WMS:
+
+1. `python -m feomcp.cli lint-mapping` must pass first.
+2. They run:
+   `python -m feomcp.cli import --source <id> --adapter <module> --actor <who>`
+3. Afterwards, check the lineage with `query_raw`:
+
+   ```cypher
+   MATCH (j:IngestJob)
+   RETURN j.job_id, j.source_id, j.status, j.total, j.succeeded, j.failed,
+          j.error_details, j.imported_at
+   ORDER BY j.imported_at DESC LIMIT 5
+   ```
+
+   Field-level changes from that batch carry `actor = "ingest:<job_id>"`.
+
+Do not call an import successful because the CLI printed a job id. Check the
+`:IngestJob` row's `status` and counts; `failed > 0` means rows were skipped, and
+`error_details` says why.
+
 ## Known limits (do not promise these)
 
-Derived facts — "the department head owns that department's work orders", "contracts
-over 1M that are not archived are key contracts" — come from an offline inference
-job that is not in v1. If the answer needs one, say so rather than inventing it.
+- **Derived facts are batch, not live.** They come from the offline `onto infer`
+  job. Call `get_inference_status()` first: `stale: true` means the ABox changed
+  since the last run, so say the derived answer may be out of date.
+- **Change history is per field, and it exists.** Use the named query
+  `contract_change_history` (or `:ChangeEvent` via `query_raw`) for "who changed
+  this, when". It is append-only and inference never rebuilds it.
+- **No text extraction.** Pulling entities out of documents or contracts is not
+  built; only structured sources through `onto import`.
+- **No incremental sync.** `onto import` reads a snapshot; scheduled deltas are
+  planned (P1).
+- **No multi-source entity resolution.** One source per entity type is the v1
+  assumption.
+- **The agent cannot trigger inference or import.** Both are CLI/batch operations,
+  deliberately not exposed as tools.
 
-Full change history ("who edited this contract and when, over time") is likewise
-not available; only the last write is stamped.

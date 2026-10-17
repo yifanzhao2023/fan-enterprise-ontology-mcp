@@ -4,7 +4,7 @@ import pytest
 
 from feomcp.errors import ValidationFailed
 from feomcp.ports import Entity
-from feomcp.validate import require_valid, validate_core
+from feomcp.validate import _matches_datatype, require_valid, validate_core
 
 TBox = "https://example.org/onto#"
 SHAPES = Path("ontology/shapes.ttl")
@@ -209,3 +209,20 @@ def test_validate_full_merges_the_inferred_layer_into_the_data_graph(tmp_path):
     violations = validate_full([abox, inferred], Path("ontology/shapes.ttl"))
     paths = {v.path for v in violations}
     assert not any(p.endswith("#belongsToCustomer") for p in paths), violations
+
+
+# --- Task 3: datetime/date accepted by the write-time datatype check ---------
+
+from datetime import date, datetime
+
+
+def test_matches_datetime():
+    dt = "http://www.w3.org/2001/XMLSchema#dateTime"
+    assert _matches_datatype(datetime(2026, 10, 17, 3, 12), dt) is True
+    assert _matches_datatype("2026-10-17T03:12:00", dt) is False
+
+
+def test_matches_date():
+    d = "http://www.w3.org/2001/XMLSchema#date"
+    assert _matches_datatype(date(2026, 10, 17), d) is True
+    assert _matches_datatype(datetime(2026, 10, 17, 3, 12), d) is False

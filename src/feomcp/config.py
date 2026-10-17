@@ -19,6 +19,7 @@ class Settings:
     max_batch: int
     redact_fields: tuple[str, ...]
     allow_shared_account: bool
+    base_iri: str = "https://example.org/id"
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":
@@ -46,6 +47,7 @@ class Settings:
             ),
             allow_shared_account=s("FEOMCP_ALLOW_SHARED_ACCOUNT", "").lower()
             in ("1", "true", "yes"),
+            base_iri=s("FEOMCP_BASE_IRI", "https://example.org/id"),
         )
         settings.validate()
         return settings

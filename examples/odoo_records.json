@@ -1,0 +1,11 @@
+{
+  "snapshot_time": "2026-10-17T00:00:00Z",
+  "version": "19.0",
+  "records": [
+    {"record_type": "customer", "fields": {"partner_id": "7", "name": "Azure Interior"}},
+    {"record_type": "customer", "fields": {"partner_id": "18", "name": "Deco Addict"}},
+    {"record_type": "customer", "fields": {"partner_id": "26", "name": "Ready Mat"}},
+    {"record_type": "contract", "fields": {"order_id": "S00042", "amount_total": "12500.00", "state": "sale", "commitment_date": "2027-03-31 12:00:00", "partner_id": "7"}},
+    {"record_type": "contract", "fields": {"order_id": "S00043", "amount_total": "840.50", "state": "draft", "commitment_date": "2027-01-15 09:30:00", "partner_id": "18"}}
+  ]
+}

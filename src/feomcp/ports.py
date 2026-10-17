@@ -22,6 +22,27 @@ class WriteBatch:
         return len(self.entities) + len(self.relations)
 
 @dataclass
+class IngestJobMeta:
+    """One append-only audit row per import attempt.
+
+    job_id identifies the attempt; input_hash identifies the inputs. Keeping
+    them separate lets a retry of the same snapshot add history instead of
+    overwriting the failed attempt.
+    """
+    job_id: str
+    input_hash: str
+    source_id: str
+    source_version: str | None
+    snapshot_time: str
+    actor: str
+    total: int
+    succeeded: int
+    failed: int
+    error_details: tuple[Mapping[str, Any], ...]
+    mapping_ref: str
+
+
+@dataclass
 class WriteReceipt:
     written_iris: tuple[str, ...]
     skipped: tuple[str, ...]
@@ -39,6 +60,10 @@ class QueryEngine(Protocol):
 
 class FactStore(Protocol):
     def upsert(self, batch: WriteBatch, *, actor: str = "system") -> WriteReceipt: ...
+    # Ingest owns the audit row: the ABox write and :IngestJob(ok) share one
+    # transaction, so an import can never leave data without its provenance.
+    def ingest(self, batch: WriteBatch, *, job: IngestJobMeta) -> WriteReceipt: ...
+    def record_ingest_failure(self, job: IngestJobMeta, *, error: str) -> None: ...
     def materialize_rdf(self, dest: Path) -> None: ...
     def replace_derived(
         self, inferred: Path, violations: Path, *,

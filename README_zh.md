@@ -8,7 +8,7 @@ Agent 读取本体 Schema、查询命名能力问题或裸 Cypher、写入经过
 
 **语言：** [English](README.md) · [简体中文](README_zh.md)
 
-> **状态：v1 已完成。** 本体存储与查询、Agent 集成层、离线推理、SHACL 校验均已实现并通过测试。本体对齐与知识抽取仍列入规划，尚未实现。
+> **状态：v1.0.2 已完成。** 本体存储与查询、Agent 集成层、离线推理、SHACL 校验，以及映射驱动的批量导入与导入血缘审计，均已实现并通过测试。知识抽取仍列入规划，尚未实现。
 
 - **协议：** MCP（stdio）
 - **语言：** Python（MCP SDK）+ JVM 推理 CLI
@@ -16,6 +16,7 @@ Agent 读取本体 Schema、查询命名能力问题或裸 Cypher、写入经过
 - **交换格式：** Turtle（RDF）；工具返回使用 JSON-LD 对齐的 `@context` 作为业务契约层，不作为 RDF 交换格式
 - **推理：** Jena rules（OWL 2 RL + 业务规则），离线执行
 - **校验：** pySHACL（写时 SHACL Core，离线全量 SHACL）
+- **导入：** mapping 工件进 Git + `onto import`（CLI，批原子），每次尝试追加一条 `:IngestJob` 血缘
 - **许可证：** [Apache License 2.0](LICENSE)
 
 ---
@@ -29,6 +30,7 @@ Agent 读取本体 Schema、查询命名能力问题或裸 Cypher、写入经过
   - [链路 A —— 写入 ABox](#链路-a--agent-写入-abox)
   - [链路 B —— Agent 查询](#链路-b--agent-查询)
   - [链路 C —— 离线推理](#链路-c--离线推理（onto-infer）)
+  - [链路 D —— 批量导入](#链路-d--批量导入onto-import)
 - [5. 主要功能](#5-主要功能)
 - [6. 工具](#6-工具)
 - [7. Resources 与 Prompts](#7-resources-与-prompts)
@@ -36,10 +38,9 @@ Agent 读取本体 Schema、查询命名能力问题或裸 Cypher、写入经过
 - [9. 配置](#9-配置)
 - [10. Quick Start](#10-quick-start)
 - [11. 安全模型](#11-安全模型)
-- [12. 开发](#12-开发)
-- [13. 测试与验收](#13-测试与验收)
-- [14. 限制](#14-限制)
-- [15. 路线图](#15-路线图)
+- [12. 限制](#12-限制)
+- [13. 路线图](#13-路线图)
+- [开发与测试](DEVELOPMENT.md)
 - [License](#license)
 
 ---
@@ -61,7 +62,7 @@ Agent 读取本体 Schema、查询命名能力问题或裸 Cypher、写入经过
 **适用用户**
 
 - **知识工程师 / 本体工程师**：能读写 Turtle、SHACL shapes、Jena rules。TBox 在 Git，由人负责。
-- **Agent 应用开发者**：在 Claude Code、Codex 或自研 MCP 客户端上，需要结构化业务事实而非文本检索。
+- **Agent 应用开发者**：在任何 MCP 兼容客户端上，需要结构化业务事实而非文本检索。
 - **数据治理 / 主数据团队**：需要可审计、带约束校验的业务事实，且违规要能回报。
 - **平台 / 基础架构工程师**：已有 Neo4j 运维能力，能跑一个 JVM 侧批处理作业。
 
@@ -77,7 +78,7 @@ Agent 读取本体 Schema、查询命名能力问题或裸 Cypher、写入经过
 
 - 非结构化文档问答——用向量库 / RAG。
 - 只要实体关系存储、不要公理与约束——属性图加一层轻 schema 更便宜。
-- 需要从源系统做本体对齐或知识抽取——不在 v1 范围（见[路线图](#15-路线图)）。
+- 需要从文本做知识抽取或多源实体消歧——已规划。结构化源系统的术语对齐与批量导入已在 Plan 3 交付。
 - 需要请求时在线 OWL DL 推理——本方案推理是离线批处理。
 - 没有 JVM 且无法安装 Java——推理链要跑 JVM。
 - 需要图形化本体建模——用 Protégé。本项目刻意不做建模。
@@ -98,7 +99,8 @@ Agent 读取本体 Schema、查询命名能力问题或裸 Cypher、写入经过
 | 1   | MCP server（Python）                             | schema 供给、查询目录、裸 Cypher、受控写入、写时 SHACL Core                         |
 | 2   | `onto infer`（Python CLI） + `rules-runner`（JVM） | 编排导出 → 调 JVM 推理 → 校验 → 回写。**JVM 侧不持 Neo4j 驱动、不持 DB 凭据、无写权限**，只读写文件 |
 | 3   | `ontology/`（Git）                               | TBox、shapes、rules、查询目录、schema 投影（生成物，CI 门禁）                        |
-| 4   | Skills + MCP prompts                           | Claude Code skill 包调用习惯；Codex 读 MCP prompts/resources              |
+| 4   | MCP resources + prompts（+ 可选 skill）           | resources 与 prompts 对每个客户端都承载 playbook；可选的调用习惯包装放在 `skills/` |
+| 5   | `onto import`（Python CLI）                      | adapter → mapping / IRI / 强转 → 与工具相同的表示写入器和写时 SHACL；每次尝试追加一条 `:IngestJob` |
 
 
 > **`ontology/` 里是可跑通的样例，不是你的本体。** 这些文件建的是一个样例域——企业合同管理——
@@ -115,18 +117,20 @@ Agent 读取本体 Schema、查询命名能力问题或裸 Cypher、写入经过
 | Git `TBox.ttl` / `shapes.ttl` / `rules/` | 权威本体与规则                                                  | 人（Protégé / LLM + 人审）                         |
 | Git `schema.projection.json`             | **查询侧扁平投影**——类、属性、关系、基数、Core 约束。**不含全部 OWL 公理，且永不进推理链路** | CI 跑 `onto project`；`git diff --exit-code` 门禁 |
 | Git `queries/*.cypher` + `manifest.json` | 查询目录 = 能力问题（CQ）集合                                        | 人 + CI 门禁                                     |
+| Git `mapping/*.yaml` + `irules.yaml` + `glossary.md` | 术语映射、IRI 规则与业务术语表——导入的数据契约                     | 人，随 TBox 一起评审                                |
 | Neo4j ABox                               | 实例                                                       | MCP 受控 ingest（Agent 可写）                       |
 | Neo4j `:INFERRED` / `{inferred:true}`    | 派生类型与派生关系                                                | `onto infer` 批作业                              |
 | Neo4j `:ConstraintViolation`             | 离线 SHACL 违规，关联到违规实例                                      | 同一作业，清空重建                                     |
+| Neo4j `:IngestJob`                       | 只追加的导入血缘：源系统、快照时间、触发人、计数、错误明细                    | `onto import`，每次尝试一条节点                        |
 
 
-**Neo4j 里有三类语义节点。** 没有 TBox 节点，没有 schema 节点。
+**Neo4j 里有三类语义节点**，另有只追加的审计行（`:ChangeEvent`、`:InferenceJob`、`:IngestJob`）。没有 TBox 节点，没有 schema 节点。
 
 ### 建模契约
 
 > v1 TBox **锁定 Jena OWL 2 RL 子集**，禁止引入超出 RL 表达能力的 OWL DL 构造；**算术业务条件一律写 Jena Rules，不得写进 TBox 公理。**
 
-该契约在 CI 中有机器检查（见[测试与验收](#13-测试与验收)）。它同时永久关掉了推理器选型问题：RL 范围内 Jena rules 是完备的——v1 不引 ELK、不引 HermiT。
+该契约在 CI 中有机器检查（见 [CI 门禁](ontology/README_zh.md#9-ci-门禁)）。它同时永久关掉了推理器选型问题：RL 范围内 Jena rules 是完备的——v1 不引 ELK、不引 HermiT。
 
 ---
 
@@ -214,6 +218,58 @@ SHACL-AF / SPARQL 约束**永不进写时路径**——太慢，且写时只回�
 - `replace_derived` 顺手写**单例元数据节点**（`job_id`、`finished_at`、输入计数、派生计数、违规计数），Agent 可查派生层有多新。一个节点——不是第四类语义节点。
 - 触发频率是运维决策。文档给建议值（每小时，或写入后 N 分钟 debounce），不写死进代码。
 
+### 链路 D —— 批量导入（`onto import`）
+
+![链路 D —— 批量导入](misc/diagrams/chain-d.gif)
+
+真实企业的数据在 ERP / MES / WMS 系统里，不在 Turtle 里。`onto import` 让一整批数据
+走与 Agent 工具**相同的表示写入器和写时 SHACL**，因此导入的事实与工具写出的事实无法漂移。
+
+```
+外部系统
+   │  SourceAdapter（用户代码：只拉取 + 拍平）
+   ▼
+Record(record_type, {field: value}) + SourceSnapshot(source_id, snapshot_time)
+   │
+   ▼  onto import --source <id> --adapter <module>
+mapping/<source>.yaml   → 类、属性、关系、代码表
+mapping/irules.yaml     → 实体 IRI，确定性，带 {source} 段
+datatype 强转           → string / integer / decimal / boolean / dateTime / date
+   │
+   ▼
+WriteBatch → FactStore.ingest
+   ├─ 表示写入器 + 写时 SHACL Core（与工具同一条路径）
+   ├─ :ChangeEvent 字段级变更，actor = "ingest:<job_id>"
+   └─ :IngestJob(ok) 同事务写入
+```
+
+**adapter 边界刻意做得很笨。** adapter 只负责拉取和拍平；类型、谓词、强转、IRI 生成、
+校验全在桥里——正因如此 mapping 才能进 Git、才能回放。
+
+**两类失败：**
+
+- **记录级** —— 缺主键、未知 record_type、代码表 miss、强转失败。该记录跳过，计入
+  `failed`，原因写进 `error_details`。一行脏数据不会卡死整个 ERP 抽取。
+- **批级** —— SHACL 拒绝、超批量上限、adapter 或驱动错误。什么都不写，只追加一条
+  `:IngestJob(failed)` 说明原因。
+
+不变量：成功的导入一定同时留下 ABox 写入与 `:IngestJob(ok)`（同一事务）；失败的导入
+ABox 不动，只留失败作业行。
+
+**血缘。** `:IngestJob` 只追加，每次尝试一条：
+
+| 字段 | 含义 |
+|---|---|
+| `job_id` | 尝试身份（唯一，永不复用） |
+| `input_hash` | 内容身份：源 + 快照时间 + mapping + IRI 规则的摘要 |
+| `source_id` / `source_version` / `snapshot_time` | 数据从哪来 |
+| `actor` / `imported_at` | 谁在什么时候触发 |
+| `status` / `total` / `succeeded` / `failed` / `error_details` | 结果如何 |
+| `mapping_ref` | 由哪个 mapping 版本驱动 |
+
+同一批写入产生的字段级变更带 `actor = "ingest:<job_id>"`，「这次导入改了什么」一条查询即可。
+批原子性与链路 A 相同：一次导入 = 一个事务；超限的抽取直接拒绝，不切块。
+
 ### 已知风险
 
 `materialize_rdf` 在大实例集导出时的内存占用。导出是把整张图读进一个 rdflib 模型；真实实例集一旦显示吃紧，退路是按标签分区导出多个文件喂 JVM。契约目前假定单文件 `abox.ttl`。
@@ -245,6 +301,24 @@ Agent 通过结构化参数写实例。没有 Cypher 写入路径，写侧注入
 
 Jena rules 产出派生类型与派生关系，物化进 Neo4j 并打显式标记，每次作业整体重建，绝不混进 ABox。
 
+### 术语对齐（Plan 3）
+
+mapping 是数据契约，不是代码：`ontology/mapping/<source>.yaml` 把源列映射到属性、
+源值映射到类、代码表映射到枚举个体。它进 Git、像代码一样评审，`onto lint-mapping`
+会拒绝引用投影里已不存在的术语。配套的 `glossary.md` 用自然语言给业务评审同一份对齐。
+
+### 批量导入桥（Plan 3）
+
+`onto import` 把 adapter 记录经 mapping、确定性 IRI 规则和 datatype 强转变成
+`WriteBatch`。它复用 MCP 写入路径的表示写入器与写时 SHACL，导入数据与工具写出的数据
+不可能漂移。源系统是 adapter——只拉取、只拍平的用户代码——接 ERP / MES / WMS 不需要改核心。
+
+### 导入血缘审计（Plan 3）
+
+每次导入尝试追加一条 `:IngestJob`，记录源系统、快照时间、触发人、计数与错误明细。
+成功和失败都记，且节点永不覆盖，重试因此留有历史。字段级 `:ChangeEvent` 通过 `actor`
+回链到作业。
+
 ### 违规回报
 
 离线 SHACL 违规落成 `:ConstraintViolation` 节点并关联到违规实例，Agent 能答「这条记录哪里不对」，而不只是「有没有问题」。
@@ -272,6 +346,8 @@ Jena rules 产出派生类型与派生关系，物化进 Neo4j 并打显式标�
 
 **没有 `load_ontology` 工具。** TBox 走 Git 加载，不走 MCP。这是「TBox 权威源在 Git」的直接后果——少一整组工具，也少一处攻击面。
 
+
+**也没有导入工具。** 批量导入是 CLI 上的 `onto import`，Agent 无法误触一次大写入。
 ### 工具契约
 
 - 工具名、参数名、返回形状**不随后端变**
@@ -303,25 +379,15 @@ ontology://schema     完整投影（大，仅人工查阅，永不进 prompt）
 - `query-playbook` —— 读 schema → 选命名查询 → 裸 Cypher 兜底 → 错误重试
 - `write-playbook` —— 写入结构、校验失败怎么改、派生事实何时更新
 
-### Claude Code 与 Codex 分工
+### MCP 客户端兼容性
 
+工具在任何支持 MCP stdio 的客户端里都能用。**知识落在 MCP resource 与 prompt**
+（至少 `ontology://playbook`）：会读它们的客户端直接拿到决策树、错误表与写入规则；
+只暴露工具的客户端也具备回答问题与写入数据所需的一切。
 
-| 载体                 | Claude Code | Codex  | 内容              |
-| ------------------ | ----------- | ------ | --------------- |
-| MCP tools          | 用           | 用      | 能力本身            |
-| MCP resources      | 用           | 看实现    | playbook、schema |
-| MCP prompts        | 用           | 看实现    | 两个 playbook     |
-| Claude Code skills | 用           | **不用** | 调用习惯包装          |
-
-
-**知识落在 MCP resource 与 prompt**（至少 `ontology://playbook`）。skill 只是薄壳——**不要在 skill 里复述 playbook**，否则两边必然漂移。否则 Codex 拿到一堆裸工具，没人告诉它「先 `search_schema`，再 `list_queries`，最后才 `query_raw`」。
-
-skill（`skills/feomcp/SKILL.md`）承载触发条件、操作顺序，以及 Claude Code 特有、不可跨客户端的那些习惯。安装：
-
-```bash
-mkdir -p .claude/skills && cp -r skills/feomcp .claude/skills/   # 本项目
-cp -r skills/feomcp ~/.claude/skills/                            # 所有项目
-```
+`skills/feomcp/` 下是一份与客户端无关的指令文件：支持 skill 的客户端可以把它作为 skill 加载，
+其它客户端可以直接粘进 agent 的系统提示。它只是薄壳——**不要在指令里复述 playbook**，
+否则两边必然漂移。
 
 ---
 
@@ -362,7 +428,7 @@ make projection
 
 > **`ontology/` 里放的是样例，不是你的本体。**
 > 当前是一个可跑通的样例域——**企业合同管理**——目的是让 server 开箱能跑、CI 有东西可回归。
-> 它刻意模拟了 6 个常见场景：**术语消歧、命名查询、多跳组织、合法写入、非法写入、安全边界**。
+> 它刻意模拟了 7 个常见场景：**术语消歧、命名查询、多跳组织、合法写入、非法写入、安全边界、外部系统批量导入**。
 > 真实使用时请整份替换成你自己的数据。怎么换见 [`ontology/README_zh.md`](ontology/README_zh.md)。
 
 ### 载入样例数据（可选）
@@ -387,11 +453,44 @@ make infer
 `get_inference_status()`——`stale: true` 表示上次跑完之后又有写入。
 需要它的场景见 [`ontology/README_zh.md`](ontology/README_zh.md) 第 13 节。
 
-### 注册进 coding agent
+### 从外部系统导入（可选）
 
-server 走 MCP stdio。命令是 venv 里的 console script——**用绝对路径**，agent 的环境不会激活你的 venv。
+源系统是你在包外自己写的 adapter；仓库自带一个读 Odoo 快照的参考 adapter：
 
-**Claude Code** —— 项目根目录 `.mcp.json`：
+```bash
+make lint-mapping                      # 全部 mapping 对照 schema 投影
+.venv/bin/python -m feomcp.cli import \
+  --source odoo --adapter examples.odoo_adapter --actor alice
+```
+
+整批必须放得进 `FEOMCP_MAX_BATCH`；超限直接拒绝，不切块。
+`examples/odoo_records.json` 是快照 fixture（3 个客户、2 张订单），演示不需要真 Odoo。
+生产部署把读 JSON 换成 Odoo 的 XML-RPC `execute_kw` 或 JSON-2 API，adapter 的两个方法不变。
+
+adapter 是**你自己维护**的两方法对象；仓库没有针对你业务 API 的内置 connector：
+
+```python
+class SourceAdapter(Protocol):
+    def snapshot(self) -> SourceSnapshot: ...        # source_id, snapshot_time, version
+    def iter_records(self) -> Iterator[Record]: ...  # record_type, 扁平 {field: value}
+```
+
+只拉取、只拍平——映射、IRI 生成、datatype 强转与校验全归桥。完整走查见
+[`ontology/README_zh.md` 第 14 节](ontology/README_zh.md#14-从业务系统批量导入onto-import)。
+
+### 注册进 MCP 客户端
+
+server 走 MCP stdio。把任何 MCP 客户端指向 venv 里的 console script——**用绝对路径**，
+客户端的环境不会激活你的 venv。
+
+| 配置项 | 值 |
+|---|---|
+| 传输 | `stdio` |
+| 命令 | `/绝对路径/.venv/bin/feomcp`（等价 `python -m feomcp.server`） |
+| 参数 | 无 |
+| 环境变量 | `FEOMCP_ONTOLOGY_DIR`、`FEOMCP_NEO4J_URI`、`FEOMCP_NEO4J_USER`、`FEOMCP_NEO4J_PASSWORD`、`FEOMCP_NEO4J_WRITE_USER`、`FEOMCP_NEO4J_WRITE_PASSWORD` |
+
+最小注册长这样；外层键名各客户端不同，但命令、参数与环境变量不变：
 
 ```json
 {
@@ -412,23 +511,6 @@ server 走 MCP stdio。命令是 venv 里的 console script——**用绝对路�
 }
 ```
 
-或 `claude mcp add feomcp -- /绝对路径/.venv/bin/feomcp`。
-
-**Codex** —— `~/.codex/config.toml`：
-
-```toml
-[mcp_servers.feomcp]
-command = "/绝对路径/.venv/bin/feomcp"
-
-[mcp_servers.feomcp.env]
-FEOMCP_ONTOLOGY_DIR = "/绝对路径/ontology"
-FEOMCP_NEO4J_URI = "bolt://localhost:7687"
-FEOMCP_NEO4J_USER = "reader"
-FEOMCP_NEO4J_PASSWORD = "…"
-```
-
-**其它 MCP 客户端** —— stdio 传输，命令 `feomcp`（等价 `python -m feomcp.server`）。
-
 > 查询账号与写入账号相同时 server 拒绝启动。给查询账号只授 `MATCH` 权限，或开发期设
 > `FEOMCP_ALLOW_SHARED_ACCOUNT=1`。
 
@@ -439,6 +521,9 @@ make demo
 ```
 
 起 Neo4j、重生成投影、载入样例 ABox、跑全部能力问题比对预期结果。
+
+仓库布局、测试分层、CI 门禁与发布/tag 约定见 [DEVELOPMENT.md](DEVELOPMENT.md)。
+
 ## 9. 配置
 
 环境变量。不引配置框架。
@@ -458,6 +543,7 @@ make demo
 | `FEOMCP_MAX_BATCH` | `500` | 单批写入条数上限 |
 | `FEOMCP_REDACT_FIELDS` | *(空)* | 读出时打码的字段名，逗号分隔 |
 | `FEOMCP_ALLOW_SHARED_ACCOUNT` | `0` | `1` 允许查询与写入共用一个账号（仅开发） |
+| `FEOMCP_BASE_IRI` | `https://example.org/id` | `onto import` 生成实体 IRI 的基址，覆盖 `irules.yaml` |
 
 **权限分离靠数据库原生账号**，不靠代码分支。server 维两个 driver session，按工具组路由：
 查询工具（1–6、9、10）走只读账号，写入工具（7、8）走读写账号。
@@ -482,6 +568,13 @@ docker compose up -d --wait   # 起 Neo4j
 make seed                     # 投影 + 灌样例 ABox
 make infer                    # 构建派生层
 make e2e                      # 全部 CQ 比对 sample_result
+```
+
+再通过映射桥导入参考 Odoo 快照：
+
+```bash
+make lint-mapping
+.venv/bin/python -m feomcp.cli import --source odoo --adapter examples.odoo_adapter
 ```
 
 然后按[安装](#8-安装)把 agent 接上，问一个业务问题。推荐第一个：
@@ -530,6 +623,8 @@ agent 应该先 `search_schema` / `list_queries`，再 `run_query("contracts_ove
 | `abox.ttl` 导出失败     | 同上，不回写                                   |
 | 回写事务失败              | 单事务回滚，旧派生数据完好                            |
 | git 工作树脏            | `onto infer` 拒跑；`--allow-dirty` 放行并标注元数据 |
+| 导入记录 mapping / 强转失败 | 跳过该记录，计入 `failed`，原因进 `:IngestJob.error_details`；整批继续 |
+| 导入批级失败（SHACL / 超限 / 驱动） | 什么都不写；`:IngestJob(failed)` 记录原因 |
 
 
 **「失败则不回写」是核心不变量。** 旧派生数据既好过没有派生数据，也好过半成品。任何一步失败，图保持在上次成功作业的状态。
@@ -542,126 +637,11 @@ agent 应该先 `search_schema` / `list_queries`，再 `run_query("contracts_ove
 
 ---
 
-## 12. 开发
-
-### 仓库布局
-
-```
-src/feomcp/           MCP server 与离线推理链
-  ports.py            QueryEngine + FactStore 两个协议
-  neo4j_store.py      唯一适配器：驱动、guard 调用点、表示写入器
-  schema.py           读 schema.projection.json
-  catalog.py          命名查询（CQ 目录）
-  validate.py         写时 SHACL Core、离线全量 SHACL、TBox profile 闸
-  guard.py            Cypher 信任边界
-  server.py           工具面，唯一出口
-  cli.py              `onto project` / `onto seed` / `onto infer`
-jvm/                  rules-runner：Turtle 进、增量出。无数据库、无网络
-ontology/             样例域（换掉它——见 ontology/README_zh.md）
-  rules/*.rules       Jena 规则；带算术的业务条件写在这里
-tests/                unit / integration / e2e
-```
-
-### 本地开发流程
-
-```bash
-python3.12 -m venv .venv && . .venv/bin/activate
-pip install -e ".[dev]"
-
-make rules-runner     # 构建 jvm/target/rules-runner.jar（要 JDK 17+ 和 Maven）
-make unit             # 无外部依赖
-make integration      # testcontainers，需要 Docker
-make demo             # down -v + up + seed + infer + e2e，跑在 docker-compose 上
-```
-
-`make integration` 和 `make demo` 要 Docker，`make unit` 不要——快速循环靠它。
-
-### 模块边界（设计摘要）
-
-只有两个 Python 端口值得立接口——存储与查询——因为两者都有已规划的第二实现。SHACL 校验、投影读取、查询目录、表示写入器都是具体实现：没有第二实现计划，包一层等于为假设交税。
-
-**推理是进程边界，不是 Python 接口。** 它的契约是文件交换（`Turtle in → inferred.ttl out`）。Jena 换 ELK 意味着替换 `rules-runner`，Python 编排层一行不动。
-
----
-
-## 13. 测试与验收
-
-### 测试分层
-
-
-| 层     | 范围                                                                                 | 依赖                           |
-| ----- | ---------------------------------------------------------------------------------- | ---------------------------- |
-| 单元    | `guard`（表驱动注入样本）、`schema` / `catalog` 解析、`validate` Core 判定、`cli` 对假 JVM 输出测 apply | 无                            |
-| 集成    | `neo4j_store`：upsert 原子性、表示写入器、`materialize_rdf` round-trip、`replace_derived` 重建   | testcontainers（Neo4j） |
-| 端到端   | `make demo`：灌样例 → `onto infer` → 全部 CQ → 断言 `sample_result`                        | docker-compose               |
-| CQ 回归 | 每条 manifest 跑 `sample_params` 比对 `sample_result`                                   | 同上                           |
-
-
-### CI 门禁（每个 PR 必过）
-
-
-| 门禁                                      | 拦什么              |
-| --------------------------------------- | ---------------- |
-| `onto project` 后 `git diff --exit-code` | 投影与 Turtle 脱节    |
-| TBox profile 检查                         | 引入超出 RL 的 OWL 构造 |
-| SHACL 校验样例 ABox                         | 样例数据脏            |
-| `onto infer` 跑通                         | 规则挂              |
-| 全部 CQ 比对 `sample_result`                | 本体变更打断查询         |
-| manifest `uses` ⊆ 投影                    | 查询引用已删的类 / 属性    |
-| 单元 + 集成测试                               | 代码回归             |
-| `make demo` 全链路                         | 集成断裂             |
-
-
-**TBox profile 检查**：`feomcp.validate.banned_owl_constructs` 在 JVM 启动前跑，拒绝建模契约禁止的五个构造器（`owl:unionOf` / `owl:complementOf` / `owl:oneOf` / `owl:hasValue` / `owl:disjointWith`）。它是黑名单 lint，代码里注明「不完整」。spec 原来首选的是 OWL API 的 `OWL2RLProfile` 权威检查，但 Jena 没有这个类，所以黑名单就是实际实现。
-
-### 必测错误路径
-
-- guard 每条规则至少一个样本（含 `apoc.cypher.run` 这类逃逸口）
-- `VALIDATION_FAILED` 到字段级（shape / path / message / focus）
-- **JVM 失败不回写** —— 旧 `:INFERRED` 完好
-- 批原子：批内一半非法 → 全不落
-- 超时 / 行上限触发
-- 投影缺失或不合法 → 拒启动
-- git 工作树脏 → `onto infer` 拒跑
-
-### 已验证行为
-
-设计时悬而未决的 spike 都已了结，每一条现在都有测试钉住。
-
-
-| 行为       | 结论                                  |
-| ---------- | ------------------------------------- |
-| ABox round-trip | `materialize_rdf` 把写进去的每个实体、类型、属性、关系原样吐出，零 diff |
-| URI 唯一键      | 以 `uri` 属性为实体唯一键；重复写入幂等；无重复实体      |
-| 版本兼容         | Neo4j 5.x 上读写会话与派生层重建稳定            |
-
-唯一未结的风险是大实例集导出的内存占用（见[已知风险](#4-工作原理)）；样例只有 18 个实体，生产规模未验证。
-
-
-### 量化指标（POC 门槛，写死）
-
-
-| 指标                 | 门槛                  |
-| ------------------ | ------------------- |
-| 命名查询路径成功率          | **≥ 99%**           |
-| 裸 Cypher 路径语法通过率   | ≥ 85%（**含一次重试后**）   |
-| 裸 Cypher 执行成功率     | ≥ 95%               |
-| 答案正确率              | ≥ 90%               |
-| CQ 覆盖率             | 样例集 100%，真实本体 ≥ 90% |
-| SHACL 违规率          | < 1%             |
-| 查询 P95             | < 500 ms         |
-| 写入校验 P95           | < 200 ms         |
-| 单次 schema 注入 token | < 2000           |
-
-
-两条查询路径分开量，才能看出查询目录的实际价值。若命名查询路径掉到 95% 以下，该补 CQ 而不是去调裸 Cypher。
-
----
-
-## 14. 限制
+## 12. 限制
 
 - 无建模 UI、无业务域建模 DSL。用 Protégé。
-- 无本体对齐与知识抽取（已规划）。
+- 术语对齐与批量导入覆盖结构化源系统。文本知识抽取与多源实体消歧已规划。
+- 导入是快照式批处理；增量同步已规划（P1）。
 - 推理离线批处理；派生事实在两次作业之间是陈旧的，这是设计而非缺陷。
 - TBox 限定 OWL 2 RL 子集。
 - 查询返回是 JSON-LD 对齐的 `@context`，不是严格 JSON-LD。RDF 交换只走文件链路。
@@ -670,20 +650,21 @@ make demo             # down -v + up + seed + infer + e2e，跑在 docker-compos
 
 ---
 
-## 15. 路线图
+## 13. 路线图
 
+**Plan 3 —— 让真实数据落地 —— 已完成。** 术语对齐、数据导入桥、只追加的导入血缘审计
+一起交付并通过测试。
 
-| 项                  | 说明                                                                        |
-| ------------------ | ------------------------------------------------------------------------- |
-| 本体对齐与知识抽取          | 新能力模块；新工具 + 新包，复用 `FactStore.upsert` + `validate_core`                    |
-| GraphDB 后端         | 新适配器实现 `QueryEngine` / `FactStore`；工具 schema 不变；补 `submit(lang="sparql")` |
-| OWL 2 EL + ELK     | 当 TBox 超出 RL（大类层次、等价类、存在性限制）时                                             |
-| 业务规则同步路径（写时跑规则）    | 小型手维护规则集，补「写完立刻要用」的派生关系                                                   |
-| 三元组级 RBAC / ABAC   | 待合规需求明确                                                                   |
-| OBDA / Ontop 对接关系库 | 若数据量大到全量抽取不划算                                                             |
+下一步是 **P1 —— 从快照到活系统**：
 
+| 项             | 说明                                                            |
+| -------------- | --------------------------------------------------------------- |
+| 增量同步       | 定时拉取增量，复用同一条导入桥；需要源系统提供更新时间 / 版本标识 |
+| 本体版本演进   | TBox 变更的影响报告，随后执行 ABox 迁移                          |
+| 知识抽取       | LLM 从文本出候选，本体 + SHACL 校验收口，人工复核                 |
 
----
+其余需求——质量看板、三元组级权限、多源实体消歧、写时同步推理、违规历史、可观测性、
+存储后端替换、OBDA、OWL 2 EL + ELK——记录在内部需求文档里，不随仓库发布。
 
 ## License
 

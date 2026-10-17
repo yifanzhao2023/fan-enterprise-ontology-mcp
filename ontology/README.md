@@ -6,9 +6,10 @@
 > own data before using this for real. Doing so **requires no Python changes**.
 
 **Supported scenarios:** term disambiguation, named queries, multi-hop org traversal,
-a legal write, an illegal write, a security boundary, and other common situations —
-see [section 12](#12-scenario-examples-few-shot) and
-[section 13](#13-inference-scenarios-after-make-infer).
+a legal write, an illegal write, a security boundary, offline-derived facts, and a
+batch import from an external ERP — see [section 12](#12-scenario-examples-few-shot),
+[section 13](#13-inference-scenarios-after-make-infer) and
+[section 14](#14-importing-from-a-business-system-onto-import).
 
 | | |
 |---|---|
@@ -16,11 +17,12 @@ see [section 12](#12-scenario-examples-few-shot) and
 | Classes / properties | 7 classes, 10 properties |
 | Named queries | 13 (CQ-01 … CQ-13) |
 | Jena rules | 2 (department-head work orders, key contracts) |
+| Import mapping | `mapping/odoo.yaml` + `mapping/irules.yaml` (reference source: Odoo) |
 | Swapping it out | section 10 below / [`README_zh.md`](README_zh.md)（中文） |
 
 ---
 
-## 1. The seven files
+## 1. The files in this directory
 
 | File | Written by | Read at runtime by | What it is |
 |---|---|---|---|
@@ -31,6 +33,9 @@ see [section 12](#12-scenario-examples-few-shot) and
 | `schema.projection.json` | **machine-generated** | `SchemaCatalog` (`search_schema` / `get_schema` / `get_constraints`) | flat query-side view |
 | `abox.ttl` | human | `onto seed` / `make seed` | sample instances |
 | `rules/*.rules` | human | `rules-runner` (JVM) | Jena rules; arithmetic business conditions |
+| `mapping/<source>.yaml` | human | `onto import`, `onto lint-mapping` | terminology mapping: source columns/values to classes, properties, relations, code tables |
+| `mapping/irules.yaml` | human | `onto import` | entity IRI template — deterministic, with a `{source}` segment |
+| `mapping/glossary.md` | human (business review) | humans, agent playbook | the same alignment in plain language |
 
 **The key point:** every schema the agent sees comes from `schema.projection.json`,
 not `TBox.ttl`. The projection is a flat query-side view — **no OWL axioms, and it is
@@ -246,10 +251,11 @@ In order:
 ```bash
 make projection        # 1. regenerate the projection
 make lint-projection   # 2. confirm it matches the TBox (what CI runs)
-make unit              # 3. unit tests (RL constructor blacklist, SHACL decisions)
-make seed              # 4. load the ABox (Neo4j must be up)
-make infer             # 5. build the derived layer
-make e2e               # 6. every CQ against its sample_result
+make lint-mapping      # 3. confirm every mapping still points at live terms
+make unit              # 4. unit tests (RL constructor blacklist, SHACL decisions)
+make seed              # 5. load the ABox (Neo4j must be up)
+make infer             # 6. build the derived layer
+make e2e               # 7. every CQ against its sample_result
 ```
 
 One shot:
@@ -270,6 +276,7 @@ make demo              # = up + seed + infer + e2e
 | `uses` ⊆ projection | a query references a deleted class/property | `Catalog.load` raises at load time |
 | every CQ vs `sample_result` | an ontology change broke a query | `tests/e2e/test_demo.py` |
 | `onto infer` runs | broken rules | `make demo` |
+| `make lint-mapping` | a mapping references a deleted class/property, an unknown code table or target record | `validate_mapping` |
 
 ---
 
@@ -281,9 +288,11 @@ make demo              # = up + seed + infer + e2e
 4. Rewrite `queries/*.cypher`: file names must match `name`
 5. Rewrite `abox.ttl`: your sample instances (or leave it empty and use the write tools)
 6. Rewrite `rules/*.rules`: your business conditions, or delete the directory
-7. `make projection && make lint-projection`
-8. `make seed && make infer && make e2e`
-9. Commit `schema.projection.json` once CI is green
+7. Write `mapping/<source>.yaml` for each external system and run `make lint-mapping`
+8. `make projection && make lint-projection`
+9. `make seed && make infer && make e2e`
+10. Run one import: `onto import --source <source> --adapter <module>`
+11. Commit `schema.projection.json` once CI is green
 
 No Python changes at any step.
 
@@ -615,3 +624,112 @@ saying so.
 
 These four used to be the "v1 cannot do this" gaps. All of them run now — expiry as a
 query rather than a derivation, for the reason above.
+
+---
+
+## 14. Importing from a business system (`onto import`)
+
+Plan 3 adds a second way in: `onto import` loads a batch from an external system (ERP /
+MES / WMS) through a mapping, instead of one `upsert` at a time or a whole Turtle file.
+The batch goes through the **same representation writer and write-time SHACL** as the
+MCP tools, so imported data and tool-written data are indistinguishable.
+
+### 14.1 The adapter boundary
+
+An adapter is user code outside `ontology/`. It has two methods and does no ontology
+work — fetch and flatten only:
+
+```python
+class SourceAdapter(Protocol):
+    def snapshot(self) -> SourceSnapshot: ...        # source_id, snapshot_time, version
+    def iter_records(self) -> Iterator[Record]: ...  # record_type, flat {field: value}
+```
+
+The repo ships a reference adapter over an Odoo snapshot:
+`examples/odoo_adapter.py` + `examples/odoo_records.json` (three customers, two orders).
+
+### 14.2 `mapping/<source>.yaml`
+
+```yaml
+source: odoo
+version: 1
+records:
+  customer:
+    class: "https://example.org/onto#Customer"
+    iri: {keys: [partner_id]}
+    properties:
+      - {field: name, predicate: "https://example.org/onto#hasName", datatype: xsd:string}
+  contract:
+    class: "https://example.org/onto#Contract"
+    iri: {keys: [order_id]}
+    properties:
+      - {field: amount_total, predicate: "https://example.org/onto#hasAmount",
+         datatype: xsd:decimal}
+      - {field: commitment_date, predicate: "https://example.org/onto#hasEndDate",
+         datatype: xsd:dateTime, format: "%Y-%m-%d %H:%M:%S"}
+    relations:
+      - {field: partner_id, predicate: "https://example.org/onto#belongsToCustomer",
+         target_record: customer}
+code_tables: {}
+```
+
+Rules:
+
+1. `class` **or** `class_by_field` + `class_values` — mutually exclusive.
+2. A relation names either `code_table:` (an enum individual) or `target_record:` (a
+   foreign key to another record's IRI) — never both, exactly one.
+3. Anything not listed in the mapping is dropped. The bridge never invents a property.
+4. `onto lint-mapping` checks every referenced class / property against
+   `schema.projection.json`, plus code-table and target-record names. Run it after any
+   TBox change; it is also a CI gate.
+
+### 14.3 `mapping/irules.yaml`
+
+```yaml
+base: "https://example.org/id"
+template: "{base}/{source}/{record_type}/{key}"
+key_join: "-"
+```
+
+The `{source}` segment is what keeps identifiers globally unique today and mergeable
+when a second source arrives. `--base-iri` overrides the base; otherwise
+`FEOMCP_BASE_IRI` applies when set.
+
+### 14.4 Coercion
+
+`xsd:string`, `xsd:integer`, `xsd:decimal`, `xsd:boolean`, `xsd:dateTime`, `xsd:date`
+(the last two accept an optional `format:`). A value that cannot be converted skips that
+record. **Coercion happens only on the import path** — agent upserts must send
+already-typed values.
+
+### 14.5 Run it
+
+```bash
+make lint-mapping
+.venv/bin/python -m feomcp.cli import \
+  --source odoo --adapter examples.odoo_adapter --actor alice
+# import ingest-1a2b3c4d5e6f: 5 written, 0 skipped of 5
+```
+
+### 14.6 What the audit row tells you
+
+One `:IngestJob` per attempt, append-only:
+
+```cypher
+MATCH (j:IngestJob)
+RETURN j.job_id, j.source_id, j.snapshot_time, j.status,
+       j.total, j.succeeded, j.failed, j.error_details
+ORDER BY j.imported_at DESC
+```
+
+Field-level changes from the batch carry `actor = "ingest:<job_id>"`, so
+`list_changes(iri)` answers "which import changed this contract".
+
+### 14.7 Failure behaviour
+
+| Situation | Result |
+|---|---|
+| A record misses a key, has an unknown record type, hits an unmapped code, or fails coercion | record skipped, counted in `failed`, reason in `error_details`; the batch continues |
+| SHACL rejects the batch, the batch exceeds `FEOMCP_MAX_BATCH`, or the adapter/driver throws | nothing written; `:IngestJob(failed)` records the cause |
+
+A successful import writes the ABox and `:IngestJob(ok)` in the same transaction.

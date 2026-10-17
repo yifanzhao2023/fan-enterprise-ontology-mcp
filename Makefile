@@ -8,7 +8,7 @@ export FEOMCP_NEO4J_USER ?= neo4j
 export FEOMCP_NEO4J_PASSWORD ?= password
 export FEOMCP_NEO4J_URI ?= bolt://localhost:7687
 
-.PHONY: demo test unit integration e2e lint-projection projection seed up down rules-runner infer ci-infer-gate
+.PHONY: demo test unit integration e2e lint-projection lint-mapping projection seed up down rules-runner infer ci-infer-gate
 
 up:
 	docker compose up -d --wait
@@ -29,6 +29,9 @@ lint-projection: projection
 	git diff --exit-code -- ontology/schema.projection.json || \
 		(echo "schema.projection.json out of date; commit the regenerated file" && exit 1)
 
+lint-mapping:
+	$(PYTHON) -m feomcp.cli lint-mapping
+
 unit:
 	$(PYTHON) -m pytest tests/unit -v
 
@@ -41,7 +44,7 @@ e2e: projection
 infer: rules-runner
 	$(PYTHON) -m feomcp.cli infer
 
-ci-infer-gate: lint-projection unit demo
+ci-infer-gate: lint-projection lint-mapping unit demo
 
 test: unit integration
 

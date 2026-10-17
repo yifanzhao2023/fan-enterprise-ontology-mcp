@@ -1,0 +1,5 @@
+# How every entity IRI is built. The {source} segment is the seam that keeps
+# identifiers globally unique today and mergeable across sources later.
+base: "https://example.org/id"
+template: "{base}/{source}/{record_type}/{key}"
+key_join: "-"
