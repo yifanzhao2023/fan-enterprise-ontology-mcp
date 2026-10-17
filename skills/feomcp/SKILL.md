@@ -1,6 +1,6 @@
 ---
 name: feomcp
-description: Use the enterprise ontology MCP server (feomcp) to answer business questions over contracts, customers, work orders and org structure, and to write instance data into it. Triggers when the user asks about 合同/客户/工单/部门/员工 business facts, wants to query or write enterprise ontology data, asks "which contracts…", "who reports to…", asks to load/validate ontology files, or asks to bulk-import data from an ERP/CSV. Also triggers on /feomcp.
+description: Use the enterprise ontology MCP server (feomcp) to answer business questions over contracts, customers, work orders and org structure, and to write instance data into it. Triggers when the user asks about 合同/客户/工单/部门/员工 business facts, wants to query or write enterprise ontology data, asks "which contracts…", "who reports to…", asks to load/validate ontology files, or asks to bulk-import data from an ERP/CSV.
 ---
 
 # Using the feomcp ontology MCP
@@ -9,12 +9,20 @@ This MCP exposes an enterprise ontology as an agent semantic memory layer. It is
 not a document store and not a SQL console — the value is the **schema and the
 constraints**, so use them.
 
+This file is a plain Markdown instruction sheet. Skill-aware clients can load
+`skills/feomcp/` as a skill; any other client can paste it into the agent's system
+instructions or retrieve the same guidance through the MCP resources and prompts.
+Nothing in it depends on a particular client.
+
 ## Before anything else
 
 Read `ontology://playbook` from the MCP resources. It is the authoritative
-decision tree, error table and write rules. This skill is only a wrapper: **do not
+decision tree, error table and write rules. This file is only a wrapper: **do not
 restate the playbook here, and do not assume its content** — if the playbook and
 this file ever disagree, the playbook wins.
+
+If your client does not expose resources, load this file as instructions instead;
+it carries the order of operations and the non-negotiables.
 
 The two prompts `query-playbook` and `write-playbook` carry the same text through
 the prompt channel.
@@ -37,7 +45,7 @@ the prompt channel.
 3. Read it back with a named query. `applied: true` says the transaction committed,
    not that the graph looks the way you meant it to.
 
-## Claude Code specifics
+## Client etiquette
 
 - Do not reach for the Neo4j driver, `cypher-shell`, or a bash pipe to the database.
   Everything goes through the MCP tools, so the guard and the audit log apply.

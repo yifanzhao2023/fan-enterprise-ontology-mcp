@@ -399,8 +399,9 @@ gets the decision tree, the error table and the write rules with no extra setup;
 client that only surfaces tools still has everything needed to answer questions and
 write data.
 
-An optional invocation-habit wrapper ships under `skills/` for clients that support
-skill packages. It is a thin wrapper — it must not restate the playbook, or the two
+A client-neutral instruction sheet ships under `skills/feomcp/`: skill-aware clients
+can load it as a skill, and any other client can paste it into the agent's system
+instructions. It is a thin wrapper — it must not restate the playbook, or the two
 will drift.
 
 ---
