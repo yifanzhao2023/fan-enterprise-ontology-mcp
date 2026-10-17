@@ -29,6 +29,12 @@ class SchemaCatalog:
             raise ValueError(f"{path} is not a schema projection (no 'classes' key)")
         return cls(data)
 
+    def known_terms(self) -> set[str]:
+        """Every IRI the projection knows, for mapping lint."""
+        return {c["iri"] for c in self._classes.values()} | {
+            p["iri"] for p in self._properties.values()
+        }
+
     def search(self, keywords: str, limit: int = 20) -> Sequence[Mapping[str, Any]]:
         needle = keywords.strip().lower()
         hits: list[dict[str, Any]] = []

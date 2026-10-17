@@ -8,9 +8,30 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+
+import yaml
+
+from .errors import FeomcpError
 from .projection import build_projection
 
 def main(argv: list[str] | None = None) -> int:
+    """Print a message, not a traceback: the CLI is the operator's surface."""
+    try:
+        return _main(argv)
+    except FeomcpError as exc:
+        print(f"{exc.code}: {exc.message}", file=sys.stderr)
+        if exc.hint:
+            print(exc.hint, file=sys.stderr)
+        return 1
+    except (ValueError, yaml.YAMLError, OSError) as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except ModuleNotFoundError as exc:
+        print(f"error: module not found: {exc.name}", file=sys.stderr)
+        return 2
+
+
+def _main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="onto")
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("project", help="build schema.projection.json from TBox + shapes")

@@ -135,3 +135,26 @@ def test_cli_import_applies_env_base_iri(monkeypatch, ontology_dir):
     ])
     assert rc == 0
     assert called["irules"].base == "https://env.example/id"
+
+
+def test_cli_reports_mapping_error_without_traceback(ontology_dir, capsys):
+    (ontology_dir / "mapping" / "erp.yaml").write_text(
+        "source: [broken\n", encoding="utf-8"
+    )
+    rc = cli.main([
+        "lint-mapping", "--source", "erp", "--ontology-dir", str(ontology_dir),
+    ])
+    err = capsys.readouterr().err
+    assert rc == 2
+    assert "erp.yaml" in err
+    assert "Traceback" not in err
+
+
+def test_cli_reports_missing_mapping_without_traceback(ontology_dir, capsys):
+    rc = cli.main([
+        "lint-mapping", "--source", "nope", "--ontology-dir", str(ontology_dir),
+    ])
+    err = capsys.readouterr().err
+    assert rc == 2
+    assert "nope.yaml" in err
+    assert "Traceback" not in err

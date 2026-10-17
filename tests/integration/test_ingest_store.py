@@ -3,7 +3,7 @@
 The provenance rule is the point: a successful import leaves both; a failed
 one leaves the row and no ABox change.
 """
-from datetime import datetime, timezone
+from datetime import datetime
 
 import pytest
 
@@ -105,7 +105,7 @@ def test_datetime_roundtrip(store, tmp_path):
                     properties={
                         "hasAmount": 10.0,
                         "hasStatus": "active",
-                        "hasEndDate": datetime(2027, 1, 1, 9, 30, tzinfo=timezone.utc),
+                        "hasEndDate": datetime(2027, 1, 1, 9, 30),  # bridge produces naive datetimes
                     },
                 ),
             ],

@@ -92,7 +92,7 @@ def _digest(path: Path) -> str:
 def load_mapping(path: Path) -> Mapping:
     try:
         return _load_mapping(path)
-    except (KeyError, TypeError, AttributeError) as exc:
+    except (KeyError, TypeError, AttributeError, yaml.YAMLError) as exc:
         raise ValueError(f"{path}: invalid mapping ({exc})") from exc
 
 
@@ -180,10 +180,21 @@ def validate_mapping(mapping: Mapping, schema: SchemaCatalog) -> list[str]:
                 problems.add(
                     f"{name}: relation {rel.field!r} needs code_table or target_record"
                 )
+            if rel.code_table is not None and rel.target_record is not None:
+                problems.add(
+                    f"{name}: relation {rel.field!r} has both code_table and "
+                    "target_record; pick one"
+                )
+            if rel.target_record is not None:
+                target = mapping.records.get(rel.target_record)
+                if target is not None and len(target.iri_keys) != 1:
+                    problems.add(
+                        f"{name}: target_record {rel.target_record!r} has "
+                        f"{len(target.iri_keys)} IRI keys; a foreign key needs exactly one"
+                    )
     for table in mapping.code_tables.values():
         referenced.add(table.class_)
-    known = {c["iri"] for c in schema._classes.values()}
-    known |= {p["iri"] for p in schema._properties.values()}
+    known = schema.known_terms()
     problems.update(referenced - known)
     return sorted(problems)
 
@@ -314,8 +325,13 @@ def apply_record(
             raise RecordError(
                 f"{record.record_type}: missing field {prop.field!r}"
             )
+        raw = record.fields[prop.field]
+        # A null with no declared type means "not provided". Emitting it would
+        # reach SET n += {k: null}, which *removes* an existing property.
+        if raw is None and prop.datatype is None:
+            continue
         properties[_local(prop.predicate)] = coerce_value(
-            record.fields[prop.field], prop.datatype, prop.format
+            raw, prop.datatype, prop.format
         )
 
     relations: list[Relation] = []

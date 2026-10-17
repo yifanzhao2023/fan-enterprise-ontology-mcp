@@ -369,3 +369,65 @@ def test_load_mapping_missing_required_key_raises_value_error(tmp_path):
     p.write_text("records: {}\n", encoding="utf-8")  # no source/version
     with pytest.raises(ValueError):
         load_mapping(p)
+
+
+# --- Second review: lint gaps and null handling -----------------------------
+
+def test_validate_mapping_rejects_both_relation_targets(tmp_path):
+    text = DOC_MAPPING.replace(
+        "code_table: region", "code_table: region, target_record: customer"
+    )
+    p = tmp_path / "both.yaml"
+    p.write_text(text, encoding="utf-8")
+    problems = validate_mapping(load_mapping(p), SchemaCatalog({
+        "classes": [{"name": "Customer", "iri": "https://example.org/onto/Customer"},
+                    {"name": "Region", "iri": "https://example.org/onto/Region"}],
+        "properties": [
+            {"name": "hasName", "iri": "https://example.org/onto/hasName", "kind": "datatype"},
+            {"name": "hasCreditLimit", "iri": "https://example.org/onto/hasCreditLimit", "kind": "datatype"},
+            {"name": "belongsToRegion", "iri": "https://example.org/onto/belongsToRegion", "kind": "object"},
+        ],
+    }))
+    assert any("customer" in problem and "relation" in problem for problem in problems)
+
+
+def test_validate_mapping_rejects_multi_key_target_record(tmp_path):
+    text = DOC_MAPPING.replace(
+        "    class_by_field: doc_kind\n",
+        "    class_by_field: doc_kind\n"
+        "    relations:\n"
+        "      - {field: customer_id, predicate: \"https://example.org/onto/belongsToCustomer\", target_record: pair}\n",
+    ).replace(
+        "  business_document:\n",
+        "  pair:\n    class: \"https://example.org/onto/Customer\"\n    iri: {keys: [a, b]}\n  business_document:\n",
+    )
+    p = tmp_path / "multi.yaml"
+    p.write_text(text, encoding="utf-8")
+    problems = validate_mapping(load_mapping(p), SchemaCatalog({
+        "classes": [{"name": "Customer", "iri": "https://example.org/onto/Customer"}],
+        "properties": [],
+    }))
+    assert any("pair" in problem for problem in problems)
+
+
+def test_apply_record_skips_null_property_without_datatype(tmp_path):
+    text = DOC_MAPPING.replace(
+        "      - {field: customer_name, predicate: \"https://example.org/onto/hasName\", datatype: \"xsd:string\"}\n",
+        "      - {field: customer_name, predicate: \"https://example.org/onto/hasName\", datatype: \"xsd:string\"}\n"
+        "      - {field: note, predicate: \"https://example.org/onto/hasNote\"}\n",
+    )
+    p = tmp_path / "nulls.yaml"
+    p.write_text(text, encoding="utf-8")
+    m = load_mapping(p)
+    entity, _, _ = apply_record(m, IRULES, Record("customer", {
+        "customer_id": "42", "customer_name": "ACME",
+        "credit_limit": "1", "region_code": "01", "note": None,
+    }))
+    assert "hasNote" not in entity.properties
+
+
+def test_load_mapping_malformed_yaml_raises_value_error(tmp_path):
+    p = tmp_path / "broken.yaml"
+    p.write_text("source: [unclosed\n", encoding="utf-8")
+    with pytest.raises(ValueError):
+        load_mapping(p)
