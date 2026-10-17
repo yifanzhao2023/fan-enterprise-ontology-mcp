@@ -39,8 +39,11 @@ onto:WorkOrderShape a sh:NodeShape ;
         sh:minCount 1 ;
         sh:maxCount 1
     ] ;
+    # No sh:maxCount on hasOwner on purpose. The rule
+    # belongsToDepartment . hasHead -> hasOwner gives a work order its department
+    # head as an *additional* responsible person, which is the point of the
+    # scenario. A maxCount of 1 would make every derived edge a violation.
     sh:property [
         sh:path onto:hasOwner ;
-        sh:class onto:Employee ;
-        sh:maxCount 1
+        sh:class onto:Employee
     ] .

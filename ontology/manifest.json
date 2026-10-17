@@ -73,7 +73,7 @@
       },
       "sample_result": [
         {
-          "amount": 1200000
+          "amount": 1200000.0
         }
       ],
       "uses": [
@@ -243,7 +243,15 @@
         },
         {
           "work_order_iri": "https://example.org/id/wo002",
+          "owner_iri": "https://example.org/id/employeeZhang"
+        },
+        {
+          "work_order_iri": "https://example.org/id/wo002",
           "owner_iri": "https://example.org/id/employeeZhao"
+        },
+        {
+          "work_order_iri": "https://example.org/id/wo003",
+          "owner_iri": "https://example.org/id/employeeZhang"
         },
         {
           "work_order_iri": "https://example.org/id/wo003",
@@ -284,6 +292,12 @@
       "sample_result": [
         {
           "work_order_iri": "https://example.org/id/wo001"
+        },
+        {
+          "work_order_iri": "https://example.org/id/wo002"
+        },
+        {
+          "work_order_iri": "https://example.org/id/wo003"
         }
       ],
       "uses": [
@@ -406,6 +420,144 @@
       ],
       "tags": [
         "统计"
+      ]
+    },
+    {
+      "name": "contracts_by_key_and_archive_state",
+      "cqid": "CQ-11",
+      "question_zh": "列出重点合同，可按是否归档过滤",
+      "params": [
+        {
+          "name": "archived",
+          "type": "boolean",
+          "required": false,
+          "default": null
+        }
+      ],
+      "returns": [
+        {
+          "name": "contract_iri",
+          "type": "iri"
+        },
+        {
+          "name": "amount",
+          "type": "decimal"
+        }
+      ],
+      "sample_params": {
+        "archived": false
+      },
+      "sample_result": [
+        {
+          "contract_iri": "https://example.org/id/contract004",
+          "amount": 1500000.0
+        },
+        {
+          "contract_iri": "https://example.org/id/contract001",
+          "amount": 1200000.0
+        }
+      ],
+      "uses": [
+        "KeyContract",
+        "Contract",
+        "hasAmount",
+        "archived"
+      ],
+      "tags": [
+        "合同",
+        "推理"
+      ]
+    },
+    {
+      "name": "contract_expiry_status",
+      "cqid": "CQ-12",
+      "question_zh": "这份合同到期了吗（以指定日期为准）",
+      "params": [
+        {
+          "name": "contract_iri",
+          "type": "iri",
+          "required": true
+        },
+        {
+          "name": "as_of",
+          "type": "date",
+          "required": true
+        }
+      ],
+      "returns": [
+        {
+          "name": "contract_iri",
+          "type": "iri"
+        },
+        {
+          "name": "end_date",
+          "type": "dateTime"
+        },
+        {
+          "name": "status",
+          "type": "string"
+        }
+      ],
+      "sample_params": {
+        "contract_iri": "https://example.org/id/contract001",
+        "as_of": "2026-10-16"
+      },
+      "sample_result": [
+        {
+          "contract_iri": "https://example.org/id/contract001",
+          "end_date": "2027-03-31T00:00:00.000000000",
+          "status": "active"
+        }
+      ],
+      "uses": [
+        "Contract",
+        "hasEndDate"
+      ],
+      "tags": [
+        "合同",
+        "时序"
+      ]
+    },
+    {
+      "name": "contract_change_history",
+      "cqid": "CQ-13",
+      "question_zh": "谁在什么时候改了这份合同",
+      "params": [
+        {
+          "name": "contract_iri",
+          "type": "iri",
+          "required": true
+        }
+      ],
+      "returns": [
+        {
+          "name": "at",
+          "type": "dateTime"
+        },
+        {
+          "name": "actor",
+          "type": "string"
+        },
+        {
+          "name": "predicate",
+          "type": "string"
+        },
+        {
+          "name": "old_value",
+          "type": "string"
+        },
+        {
+          "name": "new_value",
+          "type": "string"
+        }
+      ],
+      "sample_params": {
+        "contract_iri": "https://example.org/id/contract001"
+      },
+      "sample_result": null,
+      "uses": [],
+      "tags": [
+        "审计"
       ]
     }
   ]

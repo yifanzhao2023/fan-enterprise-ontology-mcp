@@ -1,42 +1,59 @@
-# ontology/ —— 怎么换成你自己的本体
+# ontology/ — how to swap in your own ontology
 
-这个目录放的是**一个可跑通的样例**（企业合同管理），不是你的本体。
-目的是让 server 开箱能跑、CI 有东西可回归。下面说明每个文件是什么、怎么写、怎么验证。
+> **This is a sample, not your ontology.** What lives here is **enterprise contract
+> management**, a runnable sample domain. Its purpose is to make the server work out
+> of the box and to give CI something to regress against. Replace all of it with your
+> own data before using this for real. Doing so **requires no Python changes**.
 
-换掉它们**不需要改任何 Python 代码**。
+**Supported scenarios:** term disambiguation, named queries, multi-hop org traversal,
+a legal write, an illegal write, a security boundary, and other common situations —
+see [section 12](#12-scenario-examples-few-shot) and
+[section 13](#13-inference-scenarios-after-make-infer).
+
+| | |
+|---|---|
+| Sample domain | Enterprise contract management |
+| Classes / properties | 7 classes, 10 properties |
+| Named queries | 13 (CQ-01 … CQ-13) |
+| Jena rules | 2 (department-head work orders, key contracts) |
+| Swapping it out | section 10 below / [`README_zh.md`](README_zh.md)（中文） |
 
 ---
 
-## 1. 六个文件
+## 1. The seven files
 
-| 文件 | 谁写 | 运行时谁读 | 说明 |
+| File | Written by | Read at runtime by | What it is |
 |---|---|---|---|
-| `TBox.ttl` | 人 | **没有任何运行时组件读它**。只有 `onto project` 和（Plan 2 的）推理机 | 权威本体：类、属性、domain/range |
-| `shapes.ttl` | 人 | 写入路径 `require_valid` | SHACL 约束 |
-| `queries/*.cypher` | 人 | `Catalog.run`（工具 `run_query`） | 命名能力问题 |
-| `manifest.json` | 人 | `Catalog.load` | 查询的参数、返回列、样例、`uses` |
-| `schema.projection.json` | **机器生成** | `SchemaCatalog`（工具 `search_schema` / `get_schema` / `get_constraints`） | 查询侧扁平视图 |
-| `abox.ttl` | 人 | `onto seed` / `make seed` | 样例实例数据 |
+| `TBox.ttl` | human | **nothing at runtime**. Only `onto project` and the reasoner | the authoritative ontology: classes, properties, domain/range |
+| `shapes.ttl` | human | the write path (`require_valid`) | SHACL constraints |
+| `queries/*.cypher` | human | `Catalog.run` (the `run_query` tool) | named competency questions |
+| `manifest.json` | human | `Catalog.load` | each query's parameters, return columns, sample, `uses` |
+| `schema.projection.json` | **machine-generated** | `SchemaCatalog` (`search_schema` / `get_schema` / `get_constraints`) | flat query-side view |
+| `abox.ttl` | human | `onto seed` / `make seed` | sample instances |
+| `rules/*.rules` | human | `rules-runner` (JVM) | Jena rules; arithmetic business conditions |
 
-**关键**：Agent 读到的 schema 全部来自 `schema.projection.json`，不是 `TBox.ttl`。
-投影是查询侧的扁平视图，**不含 OWL 公理，也永不喂给推理机**。
+**The key point:** every schema the agent sees comes from `schema.projection.json`,
+not `TBox.ttl`. The projection is a flat query-side view — **no OWL axioms, and it is
+never fed to the reasoner**.
 
 ---
 
 ## 2. TBox.ttl
 
-写类和属性。两件事必须遵守：
+Declare classes and properties. Two rules are mandatory:
 
-**（1）锁死 OWL 2 RL 子集。** 下列构造器禁止出现，CI 的 profile 检查会拦：
+**(1) Lock the OWL 2 RL subset.** These constructors must not appear; the CI profile
+check refuses them:
 
 ```
 owl:unionOf   owl:complementOf   owl:oneOf   owl:hasValue   owl:disjointWith
 ```
 
-**（2）算术条件不进 TBox。** 「金额 > 100 万」这类比较写不进 OWL——描述逻辑没有比较运算。
-它属于 Jena Rules（Plan 2），不要试图用公理表达。
+**(2) Arithmetic does not go in the TBox.** "Amount > 1 million" cannot be expressed
+in OWL — description logics have no comparison operator. It belongs in Jena rules
+(`rules/*.rules`). Do not try to axiomatise it.
 
-最小形状：
+Minimal shape:
 
 ```turtle
 @prefix owl:  <http://www.w3.org/2002/07/owl#> .
@@ -56,24 +73,32 @@ onto:belongsToCustomer a owl:ObjectProperty ;
     rdfs:range  onto:Customer .
 ```
 
-命名空间 `https://example.org/onto#` 是样例用的，换成你的业务命名空间。
-它会出现在每个查询结果的 `@context.vocab` 里（由 `manifest.json` 的 `namespace` 字段提供）。
+The namespace `https://example.org/onto#` belongs to the sample. Use your own business
+namespace. It appears as `@context.vocab` on every query result (from the `namespace`
+field in `manifest.json`).
+
+**Give every term an `rdfs:label`.** `search_schema` matches names *and* labels, which
+is how a Chinese business word reaches `archived` or `hasAmount`. Without labels the
+agent is reduced to guessing identifiers.
 
 ---
 
 ## 3. shapes.ttl
 
-写约束。**写入时只执行这四类**，其余不进写时路径：
+Constraints. **Only these four kinds run at write time**; nothing else enters the write
+path:
 
-| 约束 | 含义 | 写入时执行 |
+| Constraint | Meaning | Runs at write time |
 |---|---|---|
-| `sh:minCount` | 至少几个值 | ✅ |
-| `sh:maxCount` | 至多几个值 | ✅ |
-| `sh:datatype` | 字面量类型 | ✅ |
-| `sh:class` | 对象必须是某类的实例 | ✅ |
-| 其它（`sh:minInclusive`、SHACL-AF、SPARQL 约束…） | | ❌ 留给离线全量 |
+| `sh:minCount` | at least N values | yes |
+| `sh:maxCount` | at most N values | yes |
+| `sh:datatype` | literal datatype | yes |
+| `sh:class` | the object must be an instance of a class | yes |
+| anything else (`sh:minInclusive`, SHACL-AF, SPARQL constraints …) | | no — offline full run only |
 
-所以：**不要写你没打算强制执行的约束**。写进去却不校验，比不写更糟——`get_constraints` 也不会展示它。
+So: **do not write a constraint you do not intend to enforce.** A constraint that is
+present but never checked is worse than none — `get_constraints` will not show it
+either.
 
 ```turtle
 @prefix sh:   <http://www.w3.org/ns/shacl#> .
@@ -95,18 +120,19 @@ onto:ContractShape a sh:NodeShape ;
     ] .
 ```
 
-`sh:targetClass` 决定这个 shape 应用到哪些实例。写入时按被写类型的短名匹配。
+`sh:targetClass` decides which instances the shape applies to. At write time the match
+is on the short name of the type being written.
 
 ---
 
 ## 4. queries/*.cypher
 
-每条命名查询一个文件。约定：
+One file per named query. Conventions:
 
-- **文件名 = `manifest.json` 里的 `name`**（`contracts_by_customer.cypher` ↔ `"name": "contracts_by_customer"`）
-- 参数用 `$param`，由工具调用时传入，**绝不拼字符串**
-- 必须带 `LIMIT`（默认行上限 50）
-- 只读。guard 会拒 `CREATE`/`MERGE`/`DELETE`/`SET`/`REMOVE`/`DROP`/`LOAD CSV`，以及任何 `apoc.*` / `dbms.*` / 白名单外的 `CALL`
+- **file name = the `name` in `manifest.json`** (`contracts_by_customer.cypher` ↔ `"name": "contracts_by_customer"`)
+- parameters use `$param`, supplied by the tool call — **never string-concatenated**
+- must carry a `LIMIT` (row cap is 50 by default)
+- read-only. The guard rejects `CREATE`/`MERGE`/`DELETE`/`SET`/`REMOVE`/`DROP`/`LOAD CSV`, any `apoc.*` / `dbms.*`, and any `CALL` outside the whitelist
 
 ```cypher
 MATCH (c:Customer {uri: $customer_iri})<-[:belongsToCustomer]-(k:Contract)
@@ -116,11 +142,15 @@ ORDER BY amount DESC
 LIMIT 50
 ```
 
+**Queries see derived facts.** After `make infer`, a query that walks `hasOwner` will
+return both the asserted owner and the derived one. Results do not hide staleness —
+deciding whether an answer depends on derived facts is the caller's job.
+
 ---
 
 ## 5. manifest.json
 
-不是可选的元数据——**没有它目录加载直接失败**。
+Not optional metadata — **without it the catalog refuses to load**.
 
 ```json
 {
@@ -148,227 +178,262 @@ LIMIT 50
 }
 ```
 
-**三个字段是 CI 契约，不是装饰**：
+**Three fields are CI contract, not decoration:**
 
-| 字段 | 作用 |
+| Field | What it does |
 |---|---|
-| `uses` | 加载时拿去 `schema.projection.json` 里核对。引用了投影里不存在的类/属性 → 拒启动 |
-| `sample_params` | 回归测试的输入 |
-| `sample_result` | 回归测试的期望输出。数据变了要同步改，否则 CI 红 |
+| `uses` | checked against `schema.projection.json` at load time. A class/property name missing from the projection → load fails |
+| `sample_params` | the regression input |
+| `sample_result` | the expected output. Change the data and you must update this, or CI goes red |
 
-`namespace` 会成为每个查询结果 `@context.vocab` 的值。
+`namespace` becomes the `@context.vocab` value on every query result.
+
+`sample_result: null` means "demonstrated in the docs, not regression-tested". Use it
+for a query whose output cannot be pinned down — `contract_change_history` returns a
+run timestamp, so no fixed sample can ever match.
 
 ---
 
 ## 6. schema.projection.json
 
-**机器生成，不要手改。**
+**Machine-generated. Do not hand-edit.**
 
 ```bash
-make projection        # 或 python -m feomcp.cli project
+make projection        # or: python -m feomcp.cli project
 ```
 
-CI 跑 `make lint-projection`：重新生成后 `git diff --exit-code`，不一致即失败。
-改了 `TBox.ttl` 或 `shapes.ttl` 忘重新生成，PR 会红。
+CI runs `make lint-projection`: regenerate, then `git diff --exit-code`. Mismatch is
+failure. Change `TBox.ttl` or `shapes.ttl` and forget to regenerate, and the PR goes red.
 
-它只包含查询侧需要的东西：类名、属性名、类型、基数、Core 约束。不含 OWL 公理。
+It carries only what the query side needs: class names, property names, kinds,
+cardinality, Core constraints, and `rdfs:label`s. No OWL axioms.
 
 ---
 
 ## 7. abox.ttl
 
-样例实例数据。`make seed` 加载进 Neo4j，`tests/e2e` 也读同一份——所以 demo 和测试不可能漂移。
+Sample instances. `make seed` loads them into Neo4j and `tests/e2e` reads the same file,
+so the demo and the tests cannot drift apart.
 
 ```turtle
 @prefix onto: <https://example.org/onto#> .
 @prefix ex:   <https://example.org/id/> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
 
 ex:contract001 a onto:Contract ;
-    onto:hasAmount 1200000 ;
+    onto:hasAmount 1200000.0 ;
     onto:hasStatus "draft" ;
     onto:archived false ;
+    onto:hasEndDate "2027-03-31T00:00:00"^^xsd:dateTime ;
     onto:belongsToCustomer ex:customerA .
 ```
 
-`rdf:type` → 实体类型，字面量 → 数据属性，URI 对象 → 关系。和 MCP 写入工具走同一套表示写入器。
+`rdf:type` → entity type, literal → datatype property, URI object → relation. Exactly
+the same representation writer the MCP write tools use.
+
+Write money as `1200000.0`, not `1200000`. Turtle makes the bare integer `xsd:integer`
+while the TBox declares `xsd:decimal`, and the offline SHACL checks the literal's
+datatype. The exporter stamps the TBox's declared range back on, so the round trip
+stays honest either way — but keeping the file consistent saves the next reader a
+puzzle.
 
 ---
 
-## 8. 改完之后跑什么
+## 8. What to run after a change
 
-按顺序：
+In order:
 
 ```bash
-make projection        # 1. 重新生成投影
-make lint-projection   # 2. 确认投影与 TBox 一致（CI 同款）
-make unit              # 3. 单元测试（含 OWL 2 RL 构造器黑名单、SHACL 判定）
-make seed              # 4. 载入 ABox（需要 Neo4j 起着）
-make e2e               # 5. 全部 CQ 比对 sample_result
+make projection        # 1. regenerate the projection
+make lint-projection   # 2. confirm it matches the TBox (what CI runs)
+make unit              # 3. unit tests (RL constructor blacklist, SHACL decisions)
+make seed              # 4. load the ABox (Neo4j must be up)
+make infer             # 5. build the derived layer
+make e2e               # 6. every CQ against its sample_result
 ```
 
-一键：
+One shot:
 
 ```bash
-make demo              # = up + seed + e2e
+make demo              # = up + seed + infer + e2e
 ```
 
 ---
 
-## 9. CI 门禁
+## 9. CI gates
 
-| 门禁 | 拦什么 | 怎么跑 |
+| Gate | What it catches | How |
 |---|---|---|
-| `make lint-projection` | 投影与 TBox/shapes 脱节 | `git diff --exit-code` |
-| OWL 2 RL 构造器检查 | 引入超出 RL 的公理 | `tests/unit/test_ontology_model.py` |
-| SHACL 校验样例 ABox | 样例数据脏 | `tests/unit/test_validate.py` |
-| `uses` ⊆ 投影 | 查询引用已删的类/属性 | `Catalog.load` 加载期抛错 |
-| 全部 CQ 比对 `sample_result` | 本体变更打断查询 | `tests/e2e/test_demo.py` |
+| `make lint-projection` | projection drifted from TBox/shapes | `git diff --exit-code` |
+| OWL 2 RL constructor check | axioms beyond RL crept in | `tests/unit/test_ontology_model.py` |
+| SHACL on the sample ABox | dirty sample data | `tests/unit/test_validate.py` |
+| `uses` ⊆ projection | a query references a deleted class/property | `Catalog.load` raises at load time |
+| every CQ vs `sample_result` | an ontology change broke a query | `tests/e2e/test_demo.py` |
+| `onto infer` runs | broken rules | `make demo` |
 
 ---
 
-## 10. 把样例换成你的：完整走查
+## 10. Replacing the sample with yours: a full walkthrough
 
-1. 改 `TBox.ttl`：换成你的类与属性，命名空间改成你的
-2. 改 `shapes.ttl`：只写你真要强制的约束（那四类）
-3. 改 `manifest.json`：`namespace` 改掉，`queries` 逐条重写
-4. 改/增 `queries/*.cypher`：文件名对上 `name`
-5. 改 `abox.ttl`：换成你的样例实例（或留空，只用 MCP 写入工具造数据）
-6. `make projection && make lint-projection`
-7. `make seed && make e2e`
-8. CI 绿了再提交 `schema.projection.json`
+1. Rewrite `TBox.ttl`: your classes and properties, your namespace
+2. Rewrite `shapes.ttl`: only the four constraint kinds you actually enforce
+3. Rewrite `manifest.json`: change `namespace`, rewrite `queries` entry by entry
+4. Rewrite `queries/*.cypher`: file names must match `name`
+5. Rewrite `abox.ttl`: your sample instances (or leave it empty and use the write tools)
+6. Rewrite `rules/*.rules`: your business conditions, or delete the directory
+7. `make projection && make lint-projection`
+8. `make seed && make infer && make e2e`
+9. Commit `schema.projection.json` once CI is green
+
+No Python changes at any step.
 
 ---
 
-## 11. 常见问题
+## 11. FAQ
 
-**`Catalog.load` 抛 `references unknown terms`**
-`manifest.json` 的 `uses` 里有投影里没有的类/属性名。跑 `make projection`，或改 `uses`。
+**`Catalog.load` raises `references unknown terms`**
+`manifest.json`'s `uses` names a class/property the projection does not have. Run
+`make projection`, or fix `uses`.
 
 **`FileNotFoundError: queries/xxx.cypher`**
-manifest 的 `name` 和文件名对不上。
+The manifest `name` and the file name disagree.
 
-**CQ 回归红了，但查询本身没错**
-`sample_result` 是写死的期望值。你改了数据或查询，就要同步改它。
+**A CQ regression went red but the query is right**
+`sample_result` is a hard-coded expectation. Change the data or the query and you must
+update it too.
 
-**改了 TBox 但 `make lint-projection` 红**
-正常——它就是拦这个的。跑 `make projection`，把 `schema.projection.json` 一起提交。
+**`make lint-projection` is red after a TBox change**
+Correct — that is exactly what it is for. Run `make projection` and commit
+`schema.projection.json` alongside.
 
-**`build_server` 报 "query and write accounts are the same account"**
-读写账号相同，安全模型不成立。给查询账号一个只有 `MATCH` 权限的账户，或开发期设 `FEOMCP_ALLOW_SHARED_ACCOUNT=1`。
+**`build_server` says "query and write accounts are the same account"**
+Read and write share an account, which breaks the security model. Give the query
+account a `MATCH`-only role, or set `FEOMCP_ALLOW_SHARED_ACCOUNT=1` during development
+only.
+
+**`make infer` warns about a TBox term**
+`TransitiveProperty`, `SymmetricProperty`, `inverseOf`, `propertyChainAxiom` and friends
+are legal OWL 2 RL but the rules engine does not apply them. Write the rule yourself in
+`rules/*.rules`. The warning is so the silence is not a surprise.
 
 ---
 
-## 12. 场景示例（few-shot）
+## 12. Scenario examples (few-shot)
 
-样例域是企业合同管理。下面六个场景是**本体真能解、普通表格 + SQL 解不了**的问题，
-可以直接当 agent 的示例用。数据来自 `abox.ttl`，答案都能复现验证。
+The sample domain is enterprise contract management. These six are questions an
+ontology actually answers and a flat table plus SQL does not. They work as agent
+examples; the data comes from `abox.ttl` and every answer reproduces.
 
-### 场景 1 —— 术语消歧与字段发现
+### Scenario 1 — term disambiguation and field discovery
 
-**业务问题**：客户A 名下还没归档的合同，列出金额和状态。
+**Business question:** contracts for customer A that are not archived, with amount and status.
 
-**不查本体会怎样**：agent 会猜字段名。「归档」在本体里是 `archived`、「状态」是 `hasStatus`、
-「金额」是 `hasAmount`；更麻烦的是**归档和状态是两个独立字段**——contract003 状态是
-`closed` 且 `archived: true`，猜混了要么查不出，要么把已归档的当成未归档。
+**Without the ontology:** the agent guesses field names. "归档" is `archived`, "状态" is
+`hasStatus`, "金额" is `hasAmount` — and the harder part is that **archived and status are
+independent fields**. `contract003` is `closed` *and* `archived: true`; confuse the two and
+you either find nothing or report an archived contract as open.
 
-**工具路径**：`search_schema` → `query_raw`
+**Tool path:** `search_schema` → `query_raw`
 
-**示例**：
 ```
 Q: 客户A 名下还没归档的合同，金额和状态列出来
 
-工具: search_schema("归档")   → archived (property, 标签「已归档」)
-工具: search_schema("客户")   → Customer (class)、belongsToCustomer (relation)
-工具: query_raw("MATCH (c:Customer {uri:$c})<-[:belongsToCustomer]-(k:Contract)
+tool: search_schema("归档")   -> archived (property, label 「已归档」)
+tool: search_schema("客户")   -> Customer (class), belongsToCustomer (relation)
+tool: query_raw("MATCH (c:Customer {uri:$c})<-[:belongsToCustomer]-(k:Contract)
                  WHERE k.archived = false
                  RETURN k.uri AS contract_iri, k.hasAmount AS amount, k.hasStatus AS status
                  ORDER BY k.uri", {"c": "https://example.org/id/customerA"})
 
 A: contract001  1,200,000  draft
    contract002    800,000  draft
-   （contract003 属于客户A，但 archived=true，被排除）
+   (contract003 belongs to customer A but archived=true, so it is excluded)
 ```
 
-**本体在这一步起作用**：`rdfs:label` 把中文业务词映射到属性短名；`archived` 与 `hasStatus`
-分开建模，是本体的决定，不是数据库的偶然。
+**Where the ontology earns its keep:** `rdfs:label` maps the Chinese business word to
+the property short name. Keeping `archived` and `hasStatus` separate is a modelling
+decision, not a database accident.
 
 ---
 
-### 场景 2 —— 命名查询覆盖标准问题
+### Scenario 2 — named queries cover standard questions
 
-**业务问题**：销售部的负责人是谁。
+**Business question:** who heads the sales department?
 
-**不查本体会怎样**：agent 现编 Cypher，很可能把 `hasHead` 和 `hasOwner` 搞混——前者是
-**部门**负责人，后者是**工单**负责人。查出张三，但问的是李四。
+**Without the ontology:** the agent improvises Cypher and very likely confuses `hasHead`
+with `hasOwner` — the first is the **department** head, the second is the **work-order**
+owner. It answers with Zhang, you asked for Li.
 
-**工具路径**：`list_queries` → `run_query`
+**Tool path:** `list_queries` → `run_query`
 
-**示例**：
 ```
 Q: 销售部的负责人是谁
 
-工具: list_queries()  → 看到 CQ-05 department_head「查指定部门的负责人」
-工具: run_query("department_head", {"department_iri": "https://example.org/id/deptSales"})
+tool: list_queries()  -> CQ-05 department_head 「查指定部门的负责人」
+tool: run_query("department_head", {"department_iri": "https://example.org/id/departmentSales"})
 
 A: employeeZhang
 ```
 
-**本体在这一步起作用**：`hasHead` 的 domain 是 `Department`、range 是 `Employee`，语义写死在
-TBox 里；命名查询把这个语义固化成一个可复用、可回归的问答。
+**Where the ontology earns its keep:** `hasHead` has `rdfs:domain Department` and
+`rdfs:range Employee` — the semantics are written down in the TBox. The named query
+freezes that into a reusable, regression-tested question.
 
 ---
 
-### 场景 3 —— 多跳组织追溯
+### Scenario 3 — multi-hop org traversal
 
-**业务问题**：张三负责的工单属于哪个部门？该部门还有哪些工单、各自谁负责？
+**Business question:** which department does Zhang's work order belong to? What other
+work orders does that department have, and who owns each?
 
-**不查本体会怎样**：ID 在工单、部门、员工三处不一致，要多轮 join + 人工对齐；「谁负责」还
-容易被理解成部门负责人（`hasHead`）而非工单负责人（`hasOwner`）。
+**Without the ontology:** identifiers disagree across work orders, departments and
+employees; you need several joins and manual alignment. "Who is responsible" also
+blurs into department head (`hasHead`) rather than work-order owner (`hasOwner`).
 
-**工具路径**：`search_schema` → `query_raw`（目录里没有这条组合）
+**Tool path:** `search_schema` → `query_raw` (the catalog has no combined query for this)
 
-**示例**：
 ```
 Q: 张三负责的工单属于哪个部门？该部门还有哪些工单、各自谁负责
 
-工具: search_schema("负责") → hasHead (relation)、hasOwner (relation)
-工具: query_raw("MATCH (e:Employee {uri:$e})<-[:hasOwner]-(w:WorkOrder)
+tool: search_schema("负责") -> hasHead (relation), hasOwner (relation)
+tool: query_raw("MATCH (e:Employee {uri:$e})<-[:hasOwner]-(w:WorkOrder)
                  -[:belongsToDepartment]->(d:Department)<-[:belongsToDepartment]-(other:WorkOrder)
                  OPTIONAL MATCH (other)-[:hasOwner]->(o:Employee)
                  RETURN w.uri AS mine, d.uri AS dept, other.uri AS work_order_iri, o.uri AS owner_iri",
                 {"e": "https://example.org/id/employeeZhang"})
 
-A: wo001 属于 departmentSales
-   该部门另有 wo002(赵六)、wo003(王五)
+A: wo001 is in departmentSales
+   that department also has wo002 (Zhao) and wo003 (Wang)
 
-（注：Cypher 的一条路径里同一条关系不能走两次，所以 wo001 自己不会出现在「其他工单」里——
-正好对上「还有哪些」的语义。）
+(Note: Cypher will not traverse the same relationship twice in one path, so wo001
+ does not appear in "other work orders" — which is exactly what "还有" means.)
 ```
 
-**本体在这一步起作用**：`hasOwner` 与 `hasHead` 的 domain/range 让 agent 分得清两种「负责」；
-三跳在关系库里要手工对 ID，在图里是一条路径。
+**Where the ontology earns its keep:** `hasOwner` and `hasHead` have distinct
+domain/range, so the agent can tell the two kinds of "responsible" apart. Three hops
+are manual ID alignment in a relational schema; here they are one path.
 
 ---
 
-### 场景 4 —— 约束要求的合法写入
+### Scenario 4 — a legal write, as the constraints demand
 
-**业务问题**：给客户C 新签一份 80 万的合同。
+**Business question:** sign a new 800,000 contract for customer C.
 
-**不查本体会怎样**：只写合同实体，被拒。`ContractShape` 对 `belongsToCustomer` 要求
-`minCount 1`——合同必须有归属客户。
+**Without the ontology:** write only the contract entity and get rejected.
+`ContractShape` requires `belongsToCustomer` with `minCount 1` — a contract must have a
+customer.
 
-**工具路径**：`get_constraints` → `upsert_entities`（实体与关系**同批**）
+**Tool path:** `get_constraints` → `upsert_entities` (entities and relations **in one batch**)
 
-**示例**：
 ```
 Q: 给客户C 新签一份 80 万的合同
 
-工具: get_constraints(["Contract"])
-     → belongsToCustomer  minCount 1 / class Customer
-       hasAmount          datatype decimal / minCount 1 / maxCount 1
-       hasStatus          datatype string  / minCount 1 / maxCount 1
+tool: get_constraints(["Contract"])
+     -> belongsToCustomer  minCount 1 / class Customer
+        hasAmount          datatype decimal / minCount 1 / maxCount 1
+        hasStatus          datatype string  / minCount 1 / maxCount 1
 
-工具: upsert_entities(
+tool: upsert_entities(
         entities=[{iri: ".../id/contract006", types: [".../onto#Contract"],
                    properties: {hasAmount: 800000, hasStatus: "draft", archived: false}}],
         relations=[{source_iri: ".../id/contract006",
@@ -378,20 +443,20 @@ Q: 给客户C 新签一份 80 万的合同
 A: {"applied": true, "written_iris": [".../id/contract006"]}
 ```
 
-**本体在这一步起作用**：SHACL 的 `minCount` 把「合同必须有归属客户」从文档约定变成硬约束。
-`upsert_entities` 的 `relations` 参数就是为了让一个批能同时表达实体与关系。
+**Where the ontology earns its keep:** the SHACL `minCount` turns "a contract must have a
+customer" from documentation into a hard constraint. The `relations` parameter on
+`upsert_entities` exists so one batch can express both halves.
 
 ---
 
-### 场景 5 —— 约束拒绝的非法写入
+### Scenario 5 — an illegal write, rejected
 
-**业务问题**：同上，但只写合同，不写归属。
+**Business question:** same as above, but write only the contract.
 
-**工具路径**：`upsert_entities` → `VALIDATION_FAILED` → 补上关系 → 重提
+**Tool path:** `upsert_entities` → `VALIDATION_FAILED` → add the relation → resubmit
 
-**示例**：
 ```
-工具: upsert_entities(entities=[{iri: ".../id/contract007", types: [".../onto#Contract"],
+tool: upsert_entities(entities=[{iri: ".../id/contract007", types: [".../onto#Contract"],
                                  properties: {hasAmount: 800000, hasStatus: "draft", archived: false}}])
 
 A: {"code": "VALIDATION_FAILED",
@@ -401,26 +466,28 @@ A: {"code": "VALIDATION_FAILED",
     "details": {"violations": [{"path": "belongsToCustomer", "kind": "minCount",
                                 "focus_iri": ".../id/contract007", ...}]}}
 
-（补上 relations 后重提 → applied: true）
+(add the relation and resubmit -> applied: true)
 ```
 
-**本体在这一步起作用**：错误是**字段级**的（`path` + `kind`），agent 能照着改，不是「校验失败」
-四个字。注意 `retryable: false`——原样重试必然再失败，必须改请求。
+**Where the ontology earns its keep:** the error is **field-level** (`path` + `kind`), so
+the agent can act on it instead of reading "validation failed". Note
+`retryable: false` — retrying the identical request is guaranteed to fail again; the
+request has to change.
 
 ---
 
-### 场景 6 —— 安全边界
+### Scenario 6 — the security boundary
 
-**业务问题**：把 contract001 的金额改成 50 万。
+**Business question:** change contract001's amount to 500,000.
 
-**不查本体会怎样**：agent 直接 `query_raw("MATCH (n) SET n.hasAmount = ...")` 改数据，绕过
-校验、绕过审计、破坏原子性。
+**Without the ontology:** the agent runs
+`query_raw("MATCH (n) SET n.hasAmount = ...")`, bypassing validation, audit and
+atomicity.
 
-**工具路径**：`query_raw` 被拒 → 改用 `upsert_entities`
+**Tool path:** `query_raw` refused → use `upsert_entities`
 
-**示例**：
 ```
-工具: query_raw("MATCH (n {uri:$u}) SET n.hasAmount = 500000 RETURN n", {"u": ".../id/contract001"})
+tool: query_raw("MATCH (n {uri:$u}) SET n.hasAmount = 500000 RETURN n", {"u": ".../id/contract001"})
 
 A: {"code": "QUERY_REJECTED",
     "message": "write keyword SET is not allowed",
@@ -428,7 +495,7 @@ A: {"code": "QUERY_REJECTED",
     "retryable": false,
     "details": {"rule": "no-write", "keyword": "SET"}}
 
-工具: upsert_entities(
+tool: upsert_entities(
         entities=[{iri: ".../id/contract001", types: [".../onto#Contract"],
                    properties: {hasAmount: 500000, hasStatus: "draft", archived: false}}],
         relations=[{source_iri: ".../id/contract001",
@@ -437,29 +504,114 @@ A: {"code": "QUERY_REJECTED",
 
 A: {"applied": true}
 
-工具: run_query("contract_amount", {"contract_iri": ".../id/contract001"})
-A: [{"amount": 500000}]     ← 回读验证，别只看 applied: true
+tool: run_query("contract_amount", {"contract_iri": ".../id/contract001"})
+A: [{"amount": 500000}]     <- read back to verify; `applied: true` is not proof
 ```
 
-> 上面这段是「执行后会发生什么」的完整过程。`query_raw` 被拒是**现在就能复现**的；
-> 后半段的写入会真的把 contract001 的金额改成 500,000（当前是 1,200,000），
-> 想复现就照做，`make seed` 可随时把样例数据还原。
+> The first half (`query_raw` refused) reproduces right now. The second half really does
+> change contract001's amount to 500,000 (it is 1,200,000 in the sample), so run it only
+> if you want to see it. `make seed` restores the sample at any time.
 
-**本体在这一步起作用**：写入只能走结构化工具，guard 是硬闸。`upsert_entities` 走的是
-单事务 + SHACL 校验 + 审计，`query_raw` 一条都不占。
+**Where the ontology earns its keep:** writes only go through the structured tools, and
+the guard is a hard gate. `upsert_entities` gets a single transaction, SHACL validation
+and an audit line; `query_raw` gets none of the three.
 
 ---
 
-## 13. Plan 2 场景（依赖推理机，v1 跑不了）
+## 13. Inference scenarios (after `make infer`)
 
-下面这些**才是本体最强的卖点**，但需要离线推理（`onto-infer` + JVM `rules-runner`），v1 没有。
-列在这里是为了标明边界，**不要在 v1 的示例里写它们**：
+These need the offline chain. Run `make seed`, then `make infer`, then copy.
 
-| 场景 | 需要什么 |
-|---|---|
-| 「部门负责人的工单」——自动推出负责人也是工单负责人 | 属性链规则 `belongsToDepartment . hasHead → hasOwner` |
-| 「未归档且超 100 万的重点合同」 | 带算术的类定义，OWL 表达不了，要 Jena Rules |
-| 「谁在什么时候改了这份合同」（合规审计） | 变更日志 + 时序语义（OWL-Time / ISO 8601） |
-| 「合同到期了吗」 | 同上，时序本体 |
+### 13.1 Department-head work orders
 
-这些都是设计文档 §八 明列的缺口。等 Plan 2 落地后，本节转成可运行示例。
+A department head is also the owner of that department's work orders. Rule
+`belongsToDepartment . hasHead -> hasOwner`:
+
+```
+run_query("work_orders_by_department", {"department_iri": "https://example.org/id/departmentSales"})
+```
+
+Two **derived edges** come out (`r.inferred = true`):
+
+| Work order | Derived owner | |
+|---|---|---|
+| wo002 | employeeZhang | the asserted owner is Zhao; Zhang (the head) is an additional one |
+| wo003 | employeeZhang | the asserted owner is Wang |
+
+wo001 and wo004 get **no** derived edge — the conclusion coincides with an edge the ABox
+already has and is absorbed. So `MATCH ()-[r]->() WHERE r.inferred = true` returns two
+rows, not four.
+
+> `work_orders_by_department` can now return more than one row per work order, one per
+> responsible person. That is deliberate: query results do not hide derived facts.
+
+### 13.2 Key contracts
+
+Amount over 1,000,000. **A class definition with arithmetic — OWL cannot express it**, so
+it lives in `rules/business.rules`. Whether a contract is archived is current state and
+belongs to the query, not the class: an archived contract is still a key contract.
+
+```
+run_query("contracts_by_key_and_archive_state", {"archived": false})
+```
+
+```
+contract004  1500000.0
+contract001  1200000.0
+```
+
+`contract005` (2,000,000) is also a key contract but `archived: true`, so this filter
+drops it. Pass `archived: null` for all of them.
+
+### 13.3 Compliance audit: who changed this contract, and when
+
+**This is not an inference question** — it is a queryable change log. Every field of every
+write produces a `:ChangeEvent` row:
+
+```
+run_query("contract_change_history", {"contract_iri": "https://example.org/id/contract001"})
+```
+
+```
+at=2026-10-16T14:32:13+00:00  actor=system  predicate=hasEndDate
+old_value=null  new_value=2027-03-31 00:00:00
+```
+
+- An unchanged value records nothing — re-asserting a contract is not an edit
+- The log is append-only operational history, not ABox: a derived rebuild never touches
+  it, and it never reaches `abox.ttl`
+- Temporal semantics are `xsd:dateTime`. There is deliberately no OWL-Time module — the
+  current question is only "who, when, which field". A time ontology is modelling cost
+  paid for a question nobody has asked yet.
+
+### 13.4 Has this contract expired?
+
+```
+run_query("contract_expiry_status",
+          {"contract_iri": "https://example.org/id/contract001", "as_of": "2026-10-16"})
+```
+
+```
+contract001  end_date=2027-03-31  status=active
+contract004  end_date=2025-01-01  status=expired
+```
+
+**This is a query, not a derived label.** The reason is reproducibility: `onto infer` is a
+pure function and replaying the same inputs must give the same outputs, which a rule that
+reads the wall clock cannot do. If you ever need an `:Expired` label, thread `as_of`
+through as a recorded input in the job fingerprint.
+
+### 13.5 How fresh are the derived facts?
+
+```
+get_inference_status()
+```
+
+`stale` is `true` after any write, until the next `onto infer`. **Stale is the normal
+state, not a fault.** Do not answer from a derived fact while `stale` is true without
+saying so.
+
+---
+
+These four used to be the "v1 cannot do this" gaps. All of them run now — expiry as a
+query rather than a derivation, for the reason above.

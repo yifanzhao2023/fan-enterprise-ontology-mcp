@@ -6,3 +6,7 @@ __pycache__/
 .venv/
 /basic-enterprise-ontology-mcp.iml
 /docs/
+
+# JVM build output (mvn package)
+jvm/target/
+jvm/dependency-reduced-pom.xml

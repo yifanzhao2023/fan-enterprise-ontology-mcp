@@ -22,6 +22,8 @@ TOOL_NAMES = (
     "query_raw",
     "upsert_entities",
     "upsert_relations",
+    "get_inference_status",
+    "list_violations",
 )
 
 def _context(vocab: str) -> dict[str, Any]:
@@ -204,7 +206,7 @@ def build_server(settings: Settings | None = None, *, principal: str = "agent") 
                 entities=_coerce_entities(entities),
                 relations=_coerce_relations(relations or []),
             )
-            return _receipt(store.upsert(batch))
+            return _receipt(store.upsert(batch, actor=principal))
 
         return call(
             "upsert_entities",
@@ -228,11 +230,36 @@ def build_server(settings: Settings | None = None, *, principal: str = "agent") 
                 entities=_coerce_entities(entities or []),
                 relations=_coerce_relations(relations),
             )
-            return _receipt(store.upsert(batch))
+            return _receipt(store.upsert(batch, actor=principal))
 
         return call(
             "upsert_relations",
             {"relations": relations, "entities": entities or []},
+            work,
+        )
+
+    @mcp.tool()
+    def get_inference_status() -> dict[str, Any]:
+        """How fresh the derived (:INFERRED) layer is. Never fails; stale is normal."""
+
+        def work():
+            return store.inference_status()
+
+        return call("get_inference_status", {}, work)
+
+    @mcp.tool()
+    def list_violations(
+        focus_iri: str | None = None, job_id: str | None = None
+    ) -> dict[str, Any]:
+        """Offline SHACL violations from the latest onto-infer run."""
+
+        def work():
+            rows = store.list_violations(focus_iri=focus_iri, job_id=job_id)
+            return _envelope(rows, truncated=False)
+
+        return call(
+            "list_violations",
+            {"focus_iri": focus_iri, "job_id": job_id},
             work,
         )
 

@@ -1,0 +1,25 @@
+@prefix onto: <https://example.org/onto#> .
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+
+# 部门负责人工单：部门负责人默认也是该部门工单的负责人。
+# 对象属性链 belongsToDepartment . hasHead -> hasOwner。
+[dept-head-is-owner:
+  (?wo rdf:type onto:WorkOrder)
+  (?wo onto:belongsToDepartment ?dept)
+  (?dept onto:hasHead ?emp)
+  ->
+  (?wo onto:hasOwner ?emp)
+]
+
+# 重点合同：金额超过 100 万。
+# 带算术的类定义，OWL 公理表达不了，只能写进规则。
+# 注意：比较内置用裸名 greaterThan / lessThan。写成 math:greaterThan 在 Jena
+# 规则里会被当成未解析的限定名，静默永不触发。
+# 是否归档是查询侧的当前状态，不进类定义——合同归档后依然是重点合同。
+[key-contract:
+  (?c rdf:type onto:Contract)
+  (?c onto:hasAmount ?amt)
+  greaterThan(?amt, 1000000)
+  ->
+  (?c rdf:type onto:KeyContract)
+]

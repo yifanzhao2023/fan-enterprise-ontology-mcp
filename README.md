@@ -12,7 +12,7 @@ Agents read the ontology schema, query named competency questions or raw Cypher,
 
 - **Protocol:** MCP (stdio)
 - **Language:** Python (FastMCP) + JVM inference CLI
-- **Storage:** Neo4j + [neosemantics (n10s)](https://neo4j.com/labs/neosemantics/)
+- **Storage:** Neo4j
 - **Interchange:** Turtle / JSON-LD (RDF); tool results use a JSON-LD-aligned `@context`
 - **Inference:** Jena rules (OWL 2 RL + business rules), offline
 - **Validation:** pySHACL (SHACL Core at write time, full SHACL offline)
@@ -79,7 +79,7 @@ This project does not build a modeling environment. It makes a human-authored on
 - You only need entity-relation storage with no axioms or constraints — a property graph with a light schema is cheaper.
 - You need ontology alignment or knowledge extraction from source systems — out of v1 scope (see [Roadmap](#15-roadmap)).
 - You need online OWL DL reasoning at request time — inference here is offline and batch.
-- You have no JVM and cannot install Java — `onto-infer` requires one.
+- You have no JVM and cannot install Java — `onto infer` requires one.
 - You need graphical ontology modeling — use Protégé. This project deliberately does not model.
 
 ---
@@ -88,7 +88,7 @@ This project does not build a modeling environment. It makes a human-authored on
 
 ![Architecture — TBox in Git, ABox in Neo4j, inference offline](misc/diagrams/architecture.gif)
 
-**Naming:** `onto-infer` is the Python CLI users run (export → shell out to the JVM → validate → apply). `rules-runner` is the JVM pure function (`Turtle in → Turtle out`). Swapping the reasoner replaces `rules-runner` only; `onto-infer` does not change.
+**Naming:** `onto infer` is the Python CLI users run (export → shell out to the JVM → validate → apply). `rules-runner` is the JVM pure function (`Turtle in → Turtle out`). Swapping the reasoner replaces `rules-runner` only; `onto infer` does not change.
 
 **Deliverables**
 
@@ -96,7 +96,7 @@ This project does not build a modeling environment. It makes a human-authored on
 | #   | Artifact                                         | Role                                                                                                                                                |
 | --- | ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1   | MCP server (Python)                              | Schema supply, query catalog, raw Cypher, controlled writes, write-time SHACL Core                                                                  |
-| 2   | `onto-infer` (Python CLI) + `rules-runner` (JVM) | Orchestrates export → JVM inference → validate → apply. **The JVM side holds no Neo4j driver, no DB credentials, and no write access** — files only |
+| 2   | `onto infer` (Python CLI) + `rules-runner` (JVM) | Orchestrates export → JVM inference → validate → apply. **The JVM side holds no Neo4j driver, no DB credentials, and no write access** — files only |
 | 3   | `ontology/` (Git)                                | TBox, shapes, rules, query catalog, schema projection (generated, CI-gated)                                                                         |
 | 4   | Skills + MCP prompts                             | Claude Code skill wraps invocation habits; Codex reads MCP prompts/resources                                                                        |
 
@@ -119,7 +119,7 @@ This project does not build a modeling environment. It makes a human-authored on
 | Git `schema.projection.json`             | Flat **query-side projection** — classes, properties, relations, cardinality, core constraints. **Not the full set of OWL axioms, and never fed to the reasoner** | CI runs `onto project`; `git diff --exit-code` gate |
 | Git `queries/*.cypher` + `manifest.json` | Query catalog = Competency Question set                                                                                                                           | Human + CI gate                                     |
 | Neo4j ABox                               | Instances                                                                                                                                                         | MCP controlled ingest (agent-writable)              |
-| Neo4j `:INFERRED` / `{inferred:true}`    | Derived types and derived relations                                                                                                                               | `onto-infer` batch job                              |
+| Neo4j `:INFERRED` / `{inferred:true}`    | Derived types and derived relations                                                                                                                               | `onto infer` batch job                              |
 | Neo4j `:ConstraintViolation`             | Offline SHACL violations, linked to the offending instance                                                                                                        | Same batch job, cleared and rebuilt                 |
 
 
@@ -141,13 +141,13 @@ This is checked mechanically in CI (see [Testing & Acceptance](#13-testing--acce
 
 1. Agent calls `upsert_entities` / `upsert_relations` with **structured parameters, not Cypher**.
 2. `validate_core` runs the SHACL Core subset only: `sh:minCount`, `sh:maxCount`, `sh:datatype`, `sh:class`. It selects node shapes whose `sh:targetClass` matches the written types and runs on the affected subgraph only. Synchronous.
-3. The representation writer assigns/reuses IRIs (n10s URI is the entity unique key), maps properties to datatype vs. object properties, aligns labels with `rdf:type`.
+3. The representation writer assigns/reuses IRIs (the `uri` property is the entity unique key), maps properties to datatype vs. object properties, aligns labels with `rdf:type`.
 4. Returns `WriteReceipt`: written IRIs, skipped items, validation summary.
 
 Two hard constraints:
 
 - **Batch atomicity is a Neo4j single transaction.** Whole batch commits or whole batch rolls back — database-level, not application-level. The API caps batch size and rejects oversized batches with a hint to split; chunked writes would break atomicity and are not offered.
-- **Write does not update `:INFERRED`.** Derived facts stay stale until the next `onto-infer` run (see [Staleness](#staleness-semantics)).
+- **Write does not update `:INFERRED`.** Derived facts stay stale until the next `onto infer` run (see [Staleness](#staleness-semantics)).
 
 SPARQL-based SHACL (SHACL-AF) **never** runs on the write path — too slow, and write-time only answers "can this record enter".
 
@@ -173,7 +173,7 @@ Errors are structured and actionable:
 | `BACKEND_UNAVAILABLE` | Retry later; no retry storm                                                    |
 
 
-### Chain C — Offline inference (`onto-infer`)
+### Chain C — Offline inference (`onto infer`)
 
 Four steps. **The JVM does only step 2.**
 
@@ -186,7 +186,7 @@ Order is not negotiable: validation must follow inference (otherwise derived fac
 
 | File             | Content                                                       | Producer    |
 | ---------------- | ------------------------------------------------------------- | ----------- |
-| `abox.ttl`       | Full ABox as RDF                                              | n10s export |
+| `abox.ttl`       | Full ABox as RDF                                              | `materialize_rdf` (rdflib) |
 | `inferred.ttl`   | **Derived triples only — no original ABox**                   | JVM         |
 | `violations.ttl` | SHACL violations: focus node IRI / shape IRI / path / message | pySHACL     |
 
@@ -195,15 +195,15 @@ Order is not negotiable: validation must follow inference (otherwise derived fac
 
 ### JVM never writes to Neo4j
 
-> `rules-runner`'s JVM process **does not hold a Neo4j driver, does not hold DB credentials, and has no write access**. It reads and writes files only. The Python orchestration layer (`onto-infer`) owns all writes.
+> `rules-runner`'s JVM process **does not hold a Neo4j driver, does not hold DB credentials, and has no write access**. It reads and writes files only. The Python orchestration layer (`onto infer`) owns all writes.
 
 Practical payoff: least privilege (an easier security review in regulated environments), JVM-side unit-testable without a database, reproducible inference (same inputs, same outputs), and swapping the reasoner means replacing step 2 only.
 
 ### Reproducibility
 
-An inference job's inputs are fingerprinted and recorded on the single metadata node: git commit SHA of `TBox.ttl` / `rules/` / `shapes.ttl`, content hashes of `abox.ttl` / `inferred.ttl` / `violations.ttl`, n10s and Neo4j versions, and all counts.
+An inference job's inputs are fingerprinted and recorded on the single metadata node: git commit SHA of `TBox.ttl` / `rules/` / `shapes.ttl`, content hashes of `abox.ttl` / `inferred.ttl` / `violations.ttl` / `shapes.ttl`, the Neo4j version, and all counts.
 
-- `onto-infer` reads TBox/rules/shapes from a git checkout
+- `onto infer` reads TBox/rules/shapes from a git checkout
 - Dirty working tree → refuse to run; `--allow-dirty` runs and marks the metadata
 - Reproducibility means: replaying the same three input files yields the same output
 
@@ -211,7 +211,7 @@ Using a newer TBox against an older ABox is normal ontology evolution, not a bug
 
 ### Staleness semantics
 
-Between a write and the next `onto-infer`, `:INFERRED` is stale. Three places handle this explicitly:
+Between a write and the next `onto infer`, `:INFERRED` is stale. Three places handle this explicitly:
 
 - Query results **do not hide** staleness. The agent decides whether the answer depends on derived facts.
 - `replace_derived` writes a **singleton metadata node** (`job_id`, `finished_at`, input counts, derived count, violation count) so agents can ask how fresh the derived layer is. One node — not a fourth semantic class.
@@ -219,7 +219,7 @@ Between a write and the next `onto-infer`, `:INFERRED` is stale. Three places ha
 
 ### Known risk (spiked, not blocking)
 
-`materialize_rdf` memory on large instance exports. If the spike shows it does not hold, the fallback is paged n10s export concatenated afterwards, or per-label partitioned export feeding the JVM multiple files. The contract assumes a single `abox.ttl` for now.
+`materialize_rdf` memory on large instance exports. If the spike shows it does not hold, the exporter loads the whole graph into one rdflib model; the fallback is a per-label partitioned export feeding the JVM multiple files. The contract assumes a single `abox.ttl` for now.
 
 ---
 
@@ -285,7 +285,7 @@ Ten tools, five groups.
 
 **`get_constraints` returns the Core subset only** (`minCount` / `maxCount` / `datatype` / `class`), for pre-write judgment. Responses carry `scope: "core"`. **Passing write-time validation guarantees only Core conformance** — SHACL-AF / SPARQL constraint violations surface at the next offline full validation, not at write time.
 
-**`list_violations` defaults to the latest `onto-infer` job**, aligned with `job_id` on the metadata node. In v1 the graph holds only the most recent batch (rebuilt wholesale), so the filter is currently equivalent to "all"; the optional `job_id` parameter exists for audit and run comparison.
+**`list_violations` defaults to the latest `onto infer` job**, aligned with `job_id` on the metadata node. In v1 the graph holds only the most recent batch (rebuilt wholesale), so the filter is currently equivalent to "all"; the optional `job_id` parameter exists for audit and run comparison.
 
 ---
 
@@ -370,7 +370,15 @@ make projection
 `schema.projection.json` is generated from `TBox.ttl` + `shapes.ttl`. **Commit it** —
 CI fails when it is stale.
 
-### Load the sample data
+> **`ontology/` is a sample, not your ontology.**
+> It holds a runnable domain — enterprise contract management — so the server starts
+> out of the box and CI has something to regress against. It exercises six common
+> situations on purpose: term disambiguation, named queries, multi-hop org traversal,
+> a legal write, an illegal write, and a security boundary. Replace all of it with
+> your own data before you use this for real. See
+> [`ontology/README.md`](ontology/README.md) for how.
+
+### Load the sample data(Optional)
 
 ```bash
 make seed
@@ -379,6 +387,20 @@ make seed
 Reads `ontology/abox.ttl` and writes it through the same representation writer the MCP
 tools use. To replace the sample ontology with your own, see
 [`ontology/README.md`](ontology/README.md).
+
+### Build the derived layer
+
+Derived facts (`:INFERRED`) are produced by an offline batch job, never by a tool call:
+
+```bash
+make infer
+```
+
+This exports the ABox, runs `ontology/rules/*.rules` in a JVM that has no database
+access, validates the merged graph with SHACL, and replaces the derived layer in one
+transaction. Check `get_inference_status()` before answering from a derived fact —
+`stale: true` means something has been written since the last run. See
+[`ontology/README.md`](ontology/README.md) section 13 for the scenarios that need it.
 
 ### Register with a coding agent
 
@@ -528,7 +550,7 @@ how to replace it with your own ontology.
 | JVM unavailable / timeout / inference fails | **Do not apply**; previous `:INFERRED` preserved; job metadata records failure |
 | `abox.ttl` export fails                     | Same — do not apply                                                            |
 | Apply transaction fails                     | Single transaction rolls back; previous derived data intact                    |
-| Dirty git working tree                      | `onto-infer` refuses; `--allow-dirty` runs and marks the metadata              |
+| Dirty git working tree                      | `onto infer` refuses; `--allow-dirty` runs and marks the metadata              |
 
 
 **"On failure, do not apply" is the core invariant.** Old derived data beats no derived data, and beats a half-built one. Any step failing leaves the graph at the last successful job's state.
@@ -543,15 +565,38 @@ how to replace it with your own ontology.
 
 ## 12. Development
 
-> **PLACEHOLDER — not yet implemented.**
+### Repository layout
 
-Planned content:
+```
+src/feomcp/           the MCP server and the offline chain
+  ports.py            QueryEngine + FactStore protocols
+  neo4j_store.py      the only adapter: driver, guard call site, representation writer
+  schema.py           reads schema.projection.json
+  catalog.py          named queries (the CQ catalog)
+  validate.py         SHACL Core at write time, full SHACL offline, TBox profile gate
+  guard.py            the Cypher trust boundary
+  server.py           tool surface — the only exit
+  cli.py              `onto project` / `onto seed` / `onto infer`
+jvm/                  rules-runner: Turtle in, delta out. No DB, no network
+ontology/             sample domain (replace it — see ontology/README.md)
+  rules/*.rules       Jena rules; arithmetic business conditions live here
+tests/                unit / integration / e2e
+```
 
-- Repository layout
-- Port / adapter boundaries (`QueryEngine`, `FactStore`)
-- Adding a storage backend (GraphDB) without changing the tool schema
-- Adding a capability module (alignment, extraction) as new tools
-- Local development workflow
+### Local development workflow
+
+```bash
+python3.12 -m venv .venv && . .venv/bin/activate
+pip install -e ".[dev]"
+
+make rules-runner     # build jvm/target/rules-runner.jar (needs JDK 17+ and Maven)
+make unit             # no dependencies
+make integration      # testcontainers, needs a running Docker daemon
+make demo             # up + seed + infer + e2e against docker-compose
+```
+
+`make integration` and `make demo` need Docker. `make unit` does not — it is the
+fast loop.
 
 ### Module boundaries (design summary)
 
@@ -569,8 +614,8 @@ Only two Python ports earn their interface — storage and query — because bot
 | Layer         | Scope                                                                                                                                        | Depends on                    |
 | ------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- |
 | Unit          | `guard` (table-driven injection samples), `schema` / `catalog` parsing, `validate` Core judgments, `cli` apply logic against fake JVM output | nothing                       |
-| Integration   | `neo4j_store`: upsert atomicity, representation writer, `materialize_rdf` round-trip, `replace_derived` rebuild                              | testcontainers (Neo4j + n10s) |
-| End-to-end    | `make demo`: load sample → `onto-infer` → all CQs → assert `sample_result`                                                                   | docker-compose                |
+| Integration   | `neo4j_store`: upsert atomicity, representation writer, `materialize_rdf` round-trip, `replace_derived` rebuild                              | testcontainers (Neo4j) |
+| End-to-end    | `make demo`: load sample → `onto infer` → all CQs → assert `sample_result`                                                                   | docker-compose                |
 | CQ regression | Every manifest entry runs `sample_params` against `sample_result`                                                                            | same                          |
 
 
@@ -582,14 +627,14 @@ Only two Python ports earn their interface — storage and query — because bot
 | `onto project` then `git diff --exit-code` | Projection drifting from Turtle                  |
 | TBox profile check                         | OWL constructs beyond RL                         |
 | SHACL validation of sample ABox            | Dirty sample data                                |
-| `onto-infer` runs                          | Broken rules                                     |
+| `onto infer` runs                          | Broken rules                                     |
 | All CQs vs `sample_result`                 | Ontology changes breaking queries                |
 | manifest `uses` ⊆ projection               | Queries referencing deleted classes / properties |
 | Unit + integration tests                   | Code regressions                                 |
 | `make demo` full chain                     | Integration breaks                               |
 
 
-**TBox profile check**: the modeling contract needs a machine check. Preferred implementation is an authoritative `OWL2RLProfile` check on the JVM side (the JVM is already there; the cost is one dependency), failing `onto-infer` on violation.
+**TBox profile check**: the modeling contract needs a machine check. Preferred implementation is an authoritative `OWL2RLProfile` check on the JVM side (the JVM is already there; the cost is one dependency), failing `onto infer` on violation.
 
 Fallback: a Python-side constructor blacklist lint (disallow `owl:unionOf` / `owl:complementOf` / `owl:oneOf` / `owl:hasValue`, …) — a few dozen lines, **incomplete**.
 
@@ -605,7 +650,7 @@ Fallback: a Python-side constructor blacklist lint (disallow `owl:unionOf` / `ow
 - Batch atomicity: half a batch invalid → nothing lands
 - Timeout / row cap triggers
 - Projection missing or invalid → refuse to start
-- Dirty git tree → `onto-infer` refuses
+- Dirty git tree → `onto infer` refuses
 
 ### Spike acceptance criteria
 
@@ -614,9 +659,9 @@ Spikes produce **conclusions and parameters**, not code. Conclusions are written
 
 | Spike                 | Acceptance                                                                                                                 |
 | --------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| n10s round-trip       | ABox export → re-import leaves URI / properties / labels identical (zero diff)                                             |
-| URI unique key        | n10s URI as entity unique key; repeated writes are idempotent; no duplicate entities                                       |
-| Version compatibility | n10s stable on Neo4j 5.x for import and export                                                                             |
+| ABox round-trip       | `materialize_rdf` re-emits every entity, type, property and relation that was written (zero diff)                            |
+| URI unique key        | the `uri` property as entity unique key; repeated writes are idempotent; no duplicate entities                             |
+| Version compatibility | Neo4j 5.x stable for the read/write sessions and the derived-layer rebuild                                                 |
 | Large instance export | 100k instances export without OOM; record duration and peak memory; fall back to paged / partitioned export past threshold |
 
 
@@ -648,7 +693,7 @@ The two query paths are measured separately so the value of the query catalog is
 - TBox is restricted to the OWL 2 RL subset.
 - Query results use a JSON-LD-aligned `@context`, not strict JSON-LD. RDF interchange only happens over the file chain.
 - Field redaction is global config, not per-principal. Triple-level RBAC is not in v1.
-- JVM required for `onto-infer`.
+- JVM required for `onto infer`.
 
 ---
 

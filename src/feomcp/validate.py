@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from rdflib import RDF, Graph
+from rdflib import RDF, Graph, Literal, URIRef
 from rdflib import Namespace
 
 from .errors import ValidationFailed
@@ -163,3 +163,114 @@ def _matches_datatype(value: Any, datatype: Any) -> bool:
         return isinstance(value, str)
     # Fail closed: a datatype we cannot check is a datatype we do not accept.
     return False
+
+
+def write_violations(
+    violations: Sequence[Violation], dest: Path, job_id: str
+) -> None:
+    """Serialize violations in the pinned shape.
+
+    One named `sh:ValidationResult` per violation. A blank node would be useless
+    as a `:ConstraintViolation.uri` in Neo4j, and a triple soup would make
+    `list_violations(focus_iri=...)` impossible to filter.
+    """
+    g = Graph()
+    for i, v in enumerate(violations):
+        node = URIRef(f"urn:feomcp:violation:{job_id}:{i}")
+        g.add((node, RDF.type, SH.ValidationResult))
+        g.add((node, SH.focusNode, URIRef(v.focus_iri)))
+        if v.shape_iri:
+            g.add((node, SH.resultShape, URIRef(v.shape_iri)))
+        if v.path:
+            g.add((node, SH.resultPath, URIRef(v.path)))
+        g.add((node, SH.resultMessage, Literal(v.message)))
+    g.serialize(destination=str(dest), format="turtle")
+
+
+def validate_full(data_paths: Sequence[Path], shapes_path: Path) -> list[Violation]:
+    """Offline full validation over the merged data graph.
+
+    Unlike validate_core this runs everything shapes.ttl holds, including
+    SHACL-AF and SPARQL constraints (advanced=True). It is the only place those
+    run: the write path deliberately refuses them as too slow.
+
+    The TBox rides along in the data graph so `sh:class` can see subclass
+    relations. Shapes target instances, so no TBox axiom is itself validated.
+    """
+    import pyshacl
+
+    data = Graph()
+    for path in data_paths:
+        if path.exists() and path.stat().st_size:
+            data.parse(path, format="turtle")
+
+    conforms, results_graph, _text = pyshacl.validate(
+        data_graph=data,
+        shacl_graph=str(shapes_path),
+        advanced=True,
+        abort_on_first=False,
+        meta_shacl=False,
+        inplace=False,
+    )
+    if conforms:
+        return []
+
+    out: list[Violation] = []
+    for node in results_graph.subjects(RDF.type, SH["ValidationResult"]):
+        def val(pred: str) -> str:
+            v = results_graph.value(node, SH[pred])
+            return str(v) if v is not None else ""
+
+        out.append(Violation(
+            focus_iri=val("focusNode"),
+            shape_iri=val("resultShape"),
+            path=val("resultPath"),
+            message=val("resultMessage"),
+            kind=val("resultSeverity") or "violation",
+        ))
+    return out
+
+
+# --- TBox profile gate -------------------------------------------------------
+# The modelling contract locks the TBox to the Jena OWL 2 RL subset. Jena has no
+# OWL2RLProfile class (that is OWL API), so this is the spec's documented
+# fallback: a constructor blacklist. It is not complete, and it is checked here
+# — once, in Python — before the JVM is ever launched.
+
+
+def _tbox_local_names(tbox: Path) -> tuple[set[str], set[str]]:
+    """Return (names used as predicates, names used as types)."""
+    g = Graph()
+    g.parse(tbox, format="turtle")
+    predicates = {_local(p) for _s, p, _o in g}
+    types: set[str] = set()
+    for _s, p, o in g:
+        if str(p).endswith("#type"):
+            types.add(_local(o))
+    return predicates, types
+
+
+def banned_owl_constructs(tbox: Path) -> list[str]:
+    """Constructs the modelling contract forbids outright.
+
+    These break the reasoning strategy, not just the vocabulary: a rules engine
+    cannot honour them and silently derives nothing.
+    """
+    predicates, types = _tbox_local_names(tbox)
+    banned = {"unionOf", "complementOf", "oneOf", "hasValue", "disjointWith"}
+    return sorted((predicates | types) & banned)
+
+
+def unmodelled_characteristics(tbox: Path) -> list[str]:
+    """Legal OWL 2 RL that the rules engine silently ignores.
+
+    Declaring these is not an error — write the rule yourself in
+    ontology/rules/ — but it must not be a surprise.
+    """
+    predicates, types = _tbox_local_names(tbox)
+    unmodelled = {
+        "TransitiveProperty", "SymmetricProperty", "ReflexiveProperty",
+        "IrreflexiveProperty", "AsymmetricProperty", "inverseOf",
+        "propertyChainAxiom",
+    }
+    return sorted((predicates | types) & unmodelled)

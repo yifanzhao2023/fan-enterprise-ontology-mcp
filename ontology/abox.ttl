@@ -1,5 +1,6 @@
 @prefix onto: <https://example.org/onto#> .
 @prefix ex:   <https://example.org/id/> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
 
 # Sample ABox for the enterprise contract management domain.
 # Example data — replace it with your own, or write your own through the MCP
@@ -32,31 +33,34 @@ ex:employeeZhao a onto:Employee .
 # 金额跨 50 万 / 80 万 / 120 万 / 150 万 / 200 万，archived 与 hasStatus 独立
 
 ex:contract001 a onto:Contract ;
-    onto:hasAmount 1200000 ;
+    onto:hasAmount 1200000.0 ;
     onto:hasStatus "draft" ;
     onto:archived false ;
+    onto:hasEndDate "2027-03-31T00:00:00"^^xsd:dateTime ;
     onto:belongsToCustomer ex:customerA .
 
 ex:contract002 a onto:Contract ;
-    onto:hasAmount 800000 ;
+    onto:hasAmount 800000.0 ;
     onto:hasStatus "draft" ;
     onto:archived false ;
     onto:belongsToCustomer ex:customerA .
 
 ex:contract003 a onto:Contract ;
-    onto:hasAmount 500000 ;
+    onto:hasAmount 500000.0 ;
     onto:hasStatus "closed" ;
     onto:archived true ;
     onto:belongsToCustomer ex:customerA .
 
 ex:contract004 a onto:Contract ;
-    onto:hasAmount 1500000 ;
+    onto:hasAmount 1500000.0 ;
     onto:hasStatus "draft" ;
     onto:archived false ;
+    # 2025-01-01 is in the past: reachable 'expired'
+    onto:hasEndDate "2025-01-01T00:00:00"^^xsd:dateTime ;
     onto:belongsToCustomer ex:customerB .
 
 ex:contract005 a onto:Contract ;
-    onto:hasAmount 2000000 ;
+    onto:hasAmount 2000000.0 ;
     onto:hasStatus "active" ;
     onto:archived true ;
     onto:belongsToCustomer ex:customerB .
