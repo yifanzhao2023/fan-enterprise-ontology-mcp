@@ -6,12 +6,16 @@ here knows which ERP it is talking to.
 """
 
 import hashlib
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from datetime import date, datetime
 from pathlib import Path
-from typing import Any, Mapping as TypingMapping
+from typing import Any, Mapping as TypingMapping, Sequence
+from urllib.parse import quote
 
 import yaml
 
+from .adapter import Record
+from .ports import Entity, Relation
 from .schema import SchemaCatalog
 
 
@@ -142,3 +146,155 @@ def validate_mapping(mapping: Mapping, schema: SchemaCatalog) -> list[str]:
     known = {c["iri"] for c in schema._classes.values()}
     known |= {p["iri"] for p in schema._properties.values()}
     return sorted(referenced - known)
+
+
+# --- record application ------------------------------------------------------
+
+class RecordError(Exception):
+    """One record could not be mapped. The bridge skips it and counts it; the
+    batch keeps going. Never used for a batch-level failure."""
+
+
+XSD_PREFIX = "http://www.w3.org/2001/XMLSchema#"
+
+
+def _local(iri: str) -> str:
+    text = str(iri)
+    # mapping authors write `xsd:decimal`; the SHACL check speaks full IRIs
+    if text.startswith("xsd:"):
+        return text[len("xsd:"):]
+    return text.rsplit("#", 1)[-1].rsplit("/", 1)[-1]
+
+
+def coerce_value(value: Any, datatype: str | None, fmt: str | None = None) -> Any:
+    """The only place raw source strings become typed values.
+
+    Agent upserts never pass through here: they must send correctly typed
+    values. A conversion failure is a record-level error, never a silent
+    fallback to the raw string.
+    """
+    if datatype is None:
+        return value
+    if value is None or value == "":
+        raise RecordError(f"empty value for {datatype}")
+    name = _local(datatype)
+    try:
+        if name == "string":
+            return str(value)
+        if name == "integer":
+            if isinstance(value, bool):
+                raise ValueError("bool is not an integer here")
+            return int(value)
+        if name == "decimal":
+            if isinstance(value, bool):
+                raise ValueError("bool is not a decimal here")
+            return float(value)
+        if name == "boolean":
+            if isinstance(value, bool):
+                return value
+            text = str(value).strip().lower()
+            if text in ("true", "1", "yes"):
+                return True
+            if text in ("false", "0", "no"):
+                return False
+            raise ValueError("not a boolean")
+        if name == "dateTime":
+            if isinstance(value, datetime):
+                return value
+            return (datetime.strptime(str(value), fmt) if fmt
+                    else datetime.fromisoformat(str(value)))
+        if name == "date":
+            if isinstance(value, date) and not isinstance(value, datetime):
+                return value
+            if fmt:
+                return datetime.strptime(str(value), fmt).date()
+            return date.fromisoformat(str(value))
+    except (ValueError, TypeError) as exc:
+        raise RecordError(f"cannot coerce {value!r} to {name}: {exc}") from exc
+    raise RecordError(f"unsupported datatype {datatype!r}")
+
+
+def build_iri(
+    irules: Irules,
+    *,
+    source: str,
+    record_type: str,
+    key_values: Sequence[str],
+) -> str:
+    if not key_values or any(v is None or str(v) == "" for v in key_values):
+        raise RecordError(f"{record_type}: missing IRI key value")
+    key = irules.key_join.join(quote(str(v), safe="") for v in key_values)
+    return irules.template.format(
+        base=irules.base, source=source, record_type=record_type, key=key
+    )
+
+
+def apply_record(
+    mapping: Mapping, irules: Irules, record: Record
+) -> tuple[Entity, list[Relation], list[Entity]]:
+    """Map one raw record into an entity, its relations and any code-table nodes.
+
+    Returns code-table individuals referenced by this record; the caller appends
+    them to the batch so a relation never points at a node that does not exist.
+    """
+    spec = mapping.records.get(record.record_type)
+    if spec is None:
+        raise RecordError(f"unknown record_type {record.record_type!r}")
+
+    if spec.class_ is not None:
+        class_iri = spec.class_
+    else:
+        if spec.class_by_field is None:
+            raise RecordError(f"{record.record_type}: no class or class_by_field")
+        raw_class = record.fields.get(spec.class_by_field)
+        if raw_class is None:
+            raise RecordError(
+                f"{record.record_type}: missing class field {spec.class_by_field!r}"
+            )
+        class_iri = spec.class_values.get(str(raw_class))
+        if class_iri is None:
+            raise RecordError(
+                f"{record.record_type}: {spec.class_by_field}={raw_class!r} "
+                "has no class mapping"
+            )
+
+    key_values = []
+    for key in spec.iri_keys:
+        if key not in record.fields:
+            raise RecordError(f"{record.record_type}: missing IRI key {key!r}")
+        key_values.append(record.fields[key])
+    iri = build_iri(
+        irules, source=mapping.source, record_type=record.record_type,
+        key_values=key_values,
+    )
+
+    properties: dict[str, Any] = {}
+    for prop in spec.properties:
+        if prop.field not in record.fields:
+            raise RecordError(
+                f"{record.record_type}: missing field {prop.field!r}"
+            )
+        properties[_local(prop.predicate)] = coerce_value(
+            record.fields[prop.field], prop.datatype, prop.format
+        )
+
+    relations: list[Relation] = []
+    code_nodes: dict[str, Entity] = {}
+    for rel in spec.relations:
+        if rel.field not in record.fields:
+            raise RecordError(f"{record.record_type}: missing field {rel.field!r}")
+        table = mapping.code_tables.get(rel.code_table)
+        if table is None:
+            raise RecordError(
+                f"{record.record_type}: unknown code_table {rel.code_table!r}"
+            )
+        raw = record.fields[rel.field]
+        target = table.values.get(str(raw))
+        if target is None:
+            raise RecordError(
+                f"{record.record_type}: {rel.code_table}={raw!r} has no mapping"
+            )
+        relations.append(Relation(iri, rel.predicate, target))
+        code_nodes.setdefault(target, Entity(iri=target, types=(table.class_,)))
+
+    return Entity(iri=iri, types=(class_iri,), properties=properties), relations, list(code_nodes.values())
