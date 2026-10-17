@@ -8,7 +8,7 @@ Agents read the ontology schema, query named competency questions or raw Cypher,
 
 **Language:** [English](README.md) · [简体中文](README_zh.md)
 
-> **Status:** v1 + Plan 3 complete — storage, query, agent integration, offline inference, SHACL validation, and the mapping-driven batch ingest with lineage audit are all built and tested. Knowledge extraction is planned, not built.
+> **Status:** v1.0.2 — storage, query, agent integration, offline inference, SHACL validation, and the mapping-driven batch ingest with lineage audit are all built and tested. Knowledge extraction is planned, not built.
 
 - **Protocol:** MCP (stdio)
 - **Language:** Python (MCP SDK) + JVM inference CLI
