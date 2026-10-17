@@ -492,6 +492,19 @@ The batch must fit `FEOMCP_MAX_BATCH`; the loader rejects, never chunks.
 the demo needs no live Odoo. A live deployment swaps the JSON read for Odoo's
 XML-RPC `execute_kw` or JSON-2 API and keeps the same two adapter methods.
 
+An adapter is a two-method object **you own**; there is no built-in connector to
+your business API:
+
+```python
+class SourceAdapter(Protocol):
+    def snapshot(self) -> SourceSnapshot: ...        # source_id, snapshot_time, version
+    def iter_records(self) -> Iterator[Record]: ...  # record_type, flat {field: value}
+```
+
+Fetch and flatten only — mapping, IRI construction, datatype coercion and validation
+all belong to the bridge. The full walkthrough is in
+[`ontology/README.md` §14](ontology/README.md#14-importing-from-a-business-system-onto-import).
+
 ### Register with an MCP client
 
 The server speaks MCP over stdio. Point any MCP client at the console script in your

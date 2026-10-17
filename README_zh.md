@@ -466,6 +466,17 @@ make lint-mapping                      # 全部 mapping 对照 schema 投影
 `examples/odoo_records.json` 是快照 fixture（3 个客户、2 张订单），演示不需要真 Odoo。
 生产部署把读 JSON 换成 Odoo 的 XML-RPC `execute_kw` 或 JSON-2 API，adapter 的两个方法不变。
 
+adapter 是**你自己维护**的两方法对象；仓库没有针对你业务 API 的内置 connector：
+
+```python
+class SourceAdapter(Protocol):
+    def snapshot(self) -> SourceSnapshot: ...        # source_id, snapshot_time, version
+    def iter_records(self) -> Iterator[Record]: ...  # record_type, 扁平 {field: value}
+```
+
+只拉取、只拍平——映射、IRI 生成、datatype 强转与校验全归桥。完整走查见
+[`ontology/README_zh.md` 第 14 节](ontology/README_zh.md#14-从业务系统批量导入onto-import)。
+
 ### 注册进 MCP 客户端
 
 server 走 MCP stdio。把任何 MCP 客户端指向 venv 里的 console script——**用绝对路径**，
