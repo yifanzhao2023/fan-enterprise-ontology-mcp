@@ -109,7 +109,14 @@ class Neo4jStore:
         try:
             return self._upsert(batch, actor=f"ingest:{job.job_id}", job_meta=job)
         except Exception as exc:
-            self.record_ingest_failure(job, error=str(exc)[:300])
+            # The transaction rolled back, so this attempt wrote nothing:
+            # report it as such instead of the pre-write mapping counts.
+            from dataclasses import replace
+
+            self.record_ingest_failure(
+                replace(job, succeeded=0, failed=job.total),
+                error=str(exc)[:300],
+            )
             raise
 
     def record_ingest_failure(self, job: IngestJobMeta, *, error: str) -> None:

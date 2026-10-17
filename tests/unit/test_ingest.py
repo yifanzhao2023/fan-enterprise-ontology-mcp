@@ -81,6 +81,25 @@ def _good(n: int) -> Record:
     return Record("customer", {"customer_id": str(n), "customer_name": f"ACME {n}"})
 
 
+class SelfAuditingStore(FakeStore):
+    """Mirrors Neo4jStore.ingest: it audits its own write failure."""
+
+    def __init__(self):
+        super().__init__(fail_ingest=True)
+        self.failures = []
+
+    def ingest(self, batch, *, job):
+        try:
+            return super().ingest(batch, job=job)
+        except Exception as exc:
+            self.record_ingest_failure(job, error=str(exc))
+            raise
+
+    def record_ingest_failure(self, job, *, error):
+        self.failures.append((job, error))
+        super().record_ingest_failure(job, error=error)
+
+
 def test_success_and_record_level_skip(mapping):
     store = FakeStore()
     adapter = FakeAdapter([_good(1), Record("widget", {"id": "x"}), _good(2)])
@@ -123,11 +142,11 @@ def test_snapshot_failure_is_audited_and_reraised(mapping):
 
 
 def test_store_failure_is_audited_and_reraised(mapping):
-    store = FakeStore(fail_ingest=True)
+    store = SelfAuditingStore()
     with pytest.raises(RuntimeError, match="store exploded"):
         run_ingest(store, FakeAdapter([_good(1)]), mapping, IRULES,
                    actor="alice", max_batch=100)
-    _, error = store.failed
+    _, error = store.failures[0]
     assert "store exploded" in error
 
 
@@ -138,3 +157,27 @@ def test_over_max_batch_writes_nothing_and_is_audited(mapping):
         run_ingest(store, adapter, mapping, IRULES, actor="alice", max_batch=1)
     assert store.ingested is None
     assert store.failed is not None
+
+
+# --- Final review fixes ------------------------------------------------------
+
+import json
+
+
+def test_store_failure_is_audited_once_not_twice(mapping):
+    store = SelfAuditingStore()
+    with pytest.raises(RuntimeError, match="store exploded"):
+        run_ingest(store, FakeAdapter([_good(1)]), mapping, IRULES,
+                   actor="alice", max_batch=100)
+    assert len(store.failures) == 1
+
+
+def test_error_details_are_bounded(mapping):
+    store = FakeStore()
+    long_type = "unknown-" + "x" * 400
+    adapter = FakeAdapter([Record(long_type, {"id": str(i)}) for i in range(50)])
+    run_ingest(store, adapter, mapping, IRULES, actor="alice", max_batch=100)
+    payload = json.dumps(
+        list(store.ingested[1].error_details), ensure_ascii=False
+    ).encode("utf-8")
+    assert len(payload) <= 7000

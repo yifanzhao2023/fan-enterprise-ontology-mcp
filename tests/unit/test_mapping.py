@@ -307,3 +307,65 @@ def test_apply_record_relation_needs_code_table_or_target_record(tmp_path):
         apply_record(bad, IRULES, Record("business_document", {
             "doc_id": "7", "doc_kind": "contract", "customer_id": "42",
         }))
+
+
+# --- Final review fixes ------------------------------------------------------
+
+def test_irules_with_base_recomputes_digest():
+    ir = Irules(base="https://a/id", template="{base}/{key}", key_join="-", digest="filehash")
+    changed = ir.with_base("https://b/id")
+    assert changed.base == "https://b/id"
+    assert changed.digest != ir.digest
+
+
+def test_validate_mapping_unknown_code_table(tmp_path):
+    text = DOC_MAPPING.replace("code_table: region", "code_table: nope")
+    p = tmp_path / "bad.yaml"
+    p.write_text(text, encoding="utf-8")
+    problems = validate_mapping(load_mapping(p), SchemaCatalog({
+        "classes": [{"name": "Customer", "iri": "https://example.org/onto/Customer"}],
+        "properties": [
+            {"name": "hasName", "iri": "https://example.org/onto/hasName", "kind": "datatype"},
+            {"name": "hasCreditLimit", "iri": "https://example.org/onto/hasCreditLimit", "kind": "datatype"},
+            {"name": "belongsToRegion", "iri": "https://example.org/onto/belongsToRegion", "kind": "object"},
+        ],
+    }))
+    assert any("nope" in problem for problem in problems)
+
+
+def test_validate_mapping_unknown_target_record(tmp_path):
+    text = DOC_MAPPING.replace(
+        "    class_by_field: doc_kind\n",
+        "    class_by_field: doc_kind\n"
+        "    relations:\n"
+        "      - {field: customer_id, predicate: \"https://example.org/onto/belongsToCustomer\", target_record: ghost}\n",
+    )
+    p = tmp_path / "bad.yaml"
+    p.write_text(text, encoding="utf-8")
+    problems = validate_mapping(load_mapping(p), SchemaCatalog({
+        "classes": [{"name": "Customer", "iri": "https://example.org/onto/Customer"}],
+        "properties": [],
+    }))
+    assert any("ghost" in problem for problem in problems)
+
+
+def test_validate_mapping_rejects_class_and_class_by_field(tmp_path):
+    text = DOC_MAPPING.replace(
+        "  business_document:\n    iri: {keys: [doc_id]}",
+        "  business_document:\n    class: \"https://example.org/onto/Contract\"\n    iri: {keys: [doc_id]}",
+    )
+    p = tmp_path / "bad.yaml"
+    p.write_text(text, encoding="utf-8")
+    problems = validate_mapping(load_mapping(p), SchemaCatalog({
+        "classes": [{"name": "Customer", "iri": "https://example.org/onto/Customer"},
+                    {"name": "Contract", "iri": "https://example.org/onto/Contract"}],
+        "properties": [],
+    }))
+    assert any("business_document" in problem for problem in problems)
+
+
+def test_load_mapping_missing_required_key_raises_value_error(tmp_path):
+    p = tmp_path / "bad.yaml"
+    p.write_text("records: {}\n", encoding="utf-8")  # no source/version
+    with pytest.raises(ValueError):
+        load_mapping(p)

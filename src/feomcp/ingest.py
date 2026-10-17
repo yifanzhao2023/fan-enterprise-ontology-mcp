@@ -7,6 +7,7 @@ written and an :IngestJob(failed) records why.
 """
 
 import hashlib
+import json
 from dataclasses import dataclass, replace
 from typing import Any, Mapping
 from uuid import uuid4
@@ -17,6 +18,9 @@ from .mapping import Irules, Mapping as MappingArtifact, RecordError, apply_reco
 from .ports import Entity, Relation, WriteBatch
 
 _MAX_ERROR_DETAILS = 50
+# Neo4j rejects string properties over ~8 KiB; leave headroom for the rest
+# of the row so a noisy import never fails on its own skip log.
+_MAX_ERROR_PAYLOAD = 7000
 
 
 @dataclass(frozen=True)
@@ -26,6 +30,24 @@ class IngestReport:
     succeeded: int
     failed: int
     error_details: tuple[Mapping[str, Any], ...]
+
+
+def _bounded_details(
+    details: list[Mapping[str, Any]], failed: int
+) -> list[Mapping[str, Any]]:
+    """Trim the skip log to what Neo4j can store, keeping the list valid JSON."""
+    if failed > len(details):
+        details = details + [
+            {"record_type": "*", "error": "additional failures omitted"}
+        ]
+    out: list[Mapping[str, Any]] = []
+    for item in details:
+        candidate = out + [item]
+        if len(json.dumps(candidate, ensure_ascii=False).encode("utf-8")) > _MAX_ERROR_PAYLOAD - 100:
+            out.append({"record_type": "*", "error": "error details truncated"})
+            break
+        out = candidate
+    return out
 
 
 def _input_hash(
@@ -73,7 +95,6 @@ def run_ingest(
     code_nodes: dict[str, Entity] = {}
     details: list[Mapping[str, Any]] = []
     total = succeeded = failed = 0
-    batch = WriteBatch()
 
     job = IngestJobMeta(
         job_id=job_id,
@@ -120,29 +141,34 @@ def run_ingest(
                     details={"limit": max_batch},
                 )
 
-        if len(details) == _MAX_ERROR_DETAILS:
-            details.append({"record_type": "*", "error": "additional failures omitted"})
-
-        batch = WriteBatch(
-            entities=entities + list(code_nodes.values()), relations=relations
-        )
-        job = IngestJobMeta(
-            job_id=job_id,
-            input_hash=job.input_hash,
-            source_id=snapshot.source_id,
-            source_version=snapshot.version,
-            snapshot_time=snapshot.snapshot_time,
-            actor=actor,
-            total=total,
-            succeeded=succeeded,
-            failed=failed,
-            error_details=tuple(details),
-            mapping_ref=mapping.ref,
-        )
-        store.ingest(batch, job=job)
     except Exception as exc:
+        # Mapping/iteration/limit failure: nothing reached the store. Audit it
+        # here; the store audits its own write failures so no row is written
+        # twice.
+        job = replace(
+            job, total=total, succeeded=succeeded, failed=failed,
+            error_details=tuple(_bounded_details(details, failed)),
+        )
         store.record_ingest_failure(job, error=str(exc)[:300])
         raise
+
+    batch = WriteBatch(
+        entities=entities + list(code_nodes.values()), relations=relations
+    )
+    job = IngestJobMeta(
+        job_id=job_id,
+        input_hash=job.input_hash,
+        source_id=snapshot.source_id,
+        source_version=snapshot.version,
+        snapshot_time=snapshot.snapshot_time,
+        actor=actor,
+        total=total,
+        succeeded=succeeded,
+        failed=failed,
+        error_details=tuple(_bounded_details(details, failed)),
+        mapping_ref=mapping.ref,
+    )
+    store.ingest(batch, job=job)
 
     return IngestReport(
         job_id=job_id,

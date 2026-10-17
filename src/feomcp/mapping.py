@@ -74,12 +74,29 @@ class Irules:
     key_join: str
     digest: str
 
+    def with_base(self, base: str) -> "Irules":
+        """Changing the base changes every entity IRI, so the identity hash
+        must change with it or the audit would call two different imports the
+        same input."""
+        digest = hashlib.sha256(
+            f"{base}|{self.template}|{self.key_join}".encode("utf-8")
+        ).hexdigest()[:16]
+        return Irules(base=base, template=self.template, key_join=self.key_join,
+                      digest=digest)
+
 
 def _digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()[:16]
 
 
 def load_mapping(path: Path) -> Mapping:
+    try:
+        return _load_mapping(path)
+    except (KeyError, TypeError, AttributeError) as exc:
+        raise ValueError(f"{path}: invalid mapping ({exc})") from exc
+
+
+def _load_mapping(path: Path) -> Mapping:
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     records = {}
     for record_type, spec in (raw.get("records") or {}).items():
@@ -138,18 +155,37 @@ def validate_mapping(mapping: Mapping, schema: SchemaCatalog) -> list[str]:
     A dangling mapping would only surface as a silent dropped relation, so it
     is refused before the first record is read.
     """
+    problems: set[str] = set()
     referenced: set[str] = set()
-    for record in mapping.records.values():
+    for name, record in mapping.records.items():
+        if record.class_ and record.class_by_field:
+            problems.add(f"{name}: class and class_by_field are mutually exclusive")
+        if not record.class_ and not record.class_by_field:
+            problems.add(f"{name}: needs class or class_by_field")
+        if record.class_by_field and not record.class_values:
+            problems.add(f"{name}: class_by_field needs class_values")
+        if not record.iri_keys:
+            problems.add(f"{name}: iri.keys is required")
         if record.class_:
             referenced.add(record.class_)
         referenced.update(record.class_values.values())
         referenced.update(p.predicate for p in record.properties)
         referenced.update(r.predicate for r in record.relations)
+        for rel in record.relations:
+            if rel.code_table is not None and rel.code_table not in mapping.code_tables:
+                problems.add(f"{name}: unknown code_table {rel.code_table!r}")
+            if rel.target_record is not None and rel.target_record not in mapping.records:
+                problems.add(f"{name}: unknown target_record {rel.target_record!r}")
+            if rel.code_table is None and rel.target_record is None:
+                problems.add(
+                    f"{name}: relation {rel.field!r} needs code_table or target_record"
+                )
     for table in mapping.code_tables.values():
         referenced.add(table.class_)
     known = {c["iri"] for c in schema._classes.values()}
     known |= {p["iri"] for p in schema._properties.values()}
-    return sorted(referenced - known)
+    problems.update(referenced - known)
+    return sorted(problems)
 
 
 # --- record application ------------------------------------------------------

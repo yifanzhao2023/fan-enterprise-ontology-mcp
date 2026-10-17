@@ -109,3 +109,29 @@ def test_cli_import_rejects_dangling_mapping(monkeypatch, ontology_dir):
 
 def test_cli_lint_mapping_ok(ontology_dir):
     assert cli.main(["lint-mapping", "--ontology-dir", str(ontology_dir)]) == 0
+
+
+def test_cli_import_applies_env_base_iri(monkeypatch, ontology_dir):
+    from dataclasses import replace
+
+    called = {}
+
+    def fake_run_ingest(store, adapter, mapping, irules, *, actor, max_batch):
+        called["irules"] = irules
+        return IngestReport(
+            job_id="ingest-x", total=0, succeeded=0, failed=0, error_details=()
+        )
+
+    monkeypatch.setenv("FEOMCP_BASE_IRI", "https://env.example/id")
+    settings = replace(Settings.from_env({}), ontology_dir=ontology_dir)
+    monkeypatch.setattr(ingest_mod, "run_ingest", fake_run_ingest)
+    monkeypatch.setattr(store_mod, "Neo4jStore", FakeStore)
+    monkeypatch.setattr(cli, "_load_adapter", lambda spec: FakeAdapter())
+    monkeypatch.setattr(cli, "_settings", lambda args: settings)
+
+    rc = cli.main([
+        "import", "--source", "erp", "--adapter", "fake.mod",
+        "--ontology-dir", str(ontology_dir),
+    ])
+    assert rc == 0
+    assert called["irules"].base == "https://env.example/id"

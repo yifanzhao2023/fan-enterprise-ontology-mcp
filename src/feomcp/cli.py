@@ -2,6 +2,7 @@ import argparse
 import hashlib
 import importlib
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -136,8 +137,9 @@ def cmd_import(args) -> int:
         return 2
     mapping = load_mapping(mapping_path)
     irules = load_irules(settings.ontology_dir / "mapping" / "irules.yaml")
-    if args.base_iri:
-        irules = replace(irules, base=args.base_iri)
+    base = args.base_iri or os.environ.get("FEOMCP_BASE_IRI")
+    if base and base != irules.base:
+        irules = irules.with_base(base)
     store = Neo4jStore(settings)
     try:
         report = run_ingest(
