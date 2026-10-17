@@ -16,6 +16,7 @@ Agent 读取本体 Schema、查询命名能力问题或裸 Cypher、写入经过
 - **交换格式：** Turtle（RDF）；工具返回使用 JSON-LD 对齐的 `@context` 作为业务契约层，不作为 RDF 交换格式
 - **推理：** Jena rules（OWL 2 RL + 业务规则），离线执行
 - **校验：** pySHACL（写时 SHACL Core，离线全量 SHACL）
+- **导入：** mapping 工件进 Git + `onto import`（CLI，批原子），每次尝试追加一条 `:IngestJob` 血缘
 - **许可证：** [Apache License 2.0](LICENSE)
 
 ---

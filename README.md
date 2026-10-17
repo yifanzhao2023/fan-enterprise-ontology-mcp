@@ -16,6 +16,7 @@ Agents read the ontology schema, query named competency questions or raw Cypher,
 - **Interchange:** Turtle (RDF); tool results use a JSON-LD-aligned `@context` as a business contract layer, never as an RDF exchange format
 - **Inference:** Jena rules (OWL 2 RL + business rules), offline
 - **Validation:** pySHACL (SHACL Core at write time, full SHACL offline)
+- **Ingest:** mapping artifacts in Git + `onto import` (CLI, batch-atomic), with an append-only `:IngestJob` lineage row per attempt
 - **License:** [Apache License 2.0](LICENSE)
 
 ---
