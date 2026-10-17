@@ -1,5 +1,6 @@
 import argparse
 import hashlib
+import importlib
 import json
 import shutil
 import subprocess
@@ -23,6 +24,18 @@ def main(argv: list[str] | None = None) -> int:
     i.add_argument("--tbox", default="ontology/TBox.ttl")
     i.add_argument("--allow-dirty", action="store_true")
     i.add_argument("--keep", default=None, help="keep intermediates in this directory")
+    imp = sub.add_parser("import", help="run one adapter import batch")
+    imp.add_argument("--source", required=True, help="mapping/source id")
+    imp.add_argument("--adapter", required=True,
+                     help="python module exposing build_adapter()")
+    imp.add_argument("--mapping", default=None,
+                     help="mapping path (default ontology/mapping/<source>.yaml)")
+    imp.add_argument("--base-iri", default=None, help="override IRI base")
+    imp.add_argument("--actor", default="onto", help="who triggered the import")
+    imp.add_argument("--ontology-dir", default=None, help="override ontology dir")
+    lm = sub.add_parser("lint-mapping", help="check mappings against the projection")
+    lm.add_argument("--source", default=None, help="check one mapping only")
+    lm.add_argument("--ontology-dir", default=None, help="override ontology dir")
     args = parser.parse_args(argv)
     if args.command == "seed":
         from .config import Settings
@@ -35,6 +48,10 @@ def main(argv: list[str] | None = None) -> int:
             store.close()
         print(f"seeded {len(receipt.written_iris)} entities from {args.abox}")
         return 0
+    if args.command == "import":
+        return cmd_import(args)
+    if args.command == "lint-mapping":
+        return cmd_lint_mapping(args)
     if args.command == "project":
         data = build_projection(Path(args.tbox), Path(args.shapes))
         text = json.dumps(data, sort_keys=True, ensure_ascii=False, indent=2) + "\n"
@@ -52,6 +69,89 @@ def main(argv: list[str] | None = None) -> int:
             keep=Path(args.keep) if args.keep else None,
         )
     return 2
+
+def _load_adapter(spec: str):
+    """Adapter modules stay outside the package: each source brings its own."""
+    return importlib.import_module(spec).build_adapter()
+
+
+def _settings(args):
+    from dataclasses import replace
+    from .config import Settings
+
+    settings = Settings.from_env()
+    if getattr(args, "ontology_dir", None):
+        settings = replace(settings, ontology_dir=Path(args.ontology_dir))
+    return settings
+
+
+def _lint(mapping_path: Path, settings) -> list[str]:
+    from .mapping import load_mapping, validate_mapping
+    from .schema import SchemaCatalog
+
+    return validate_mapping(
+        load_mapping(mapping_path), SchemaCatalog.load(settings.ontology_dir)
+    )
+
+
+def cmd_lint_mapping(args) -> int:
+    settings = _settings(args)
+    directory = settings.ontology_dir / "mapping"
+    paths = (
+        [directory / f"{args.source}.yaml"]
+        if args.source
+        else sorted(p for p in directory.glob("*.yaml") if p.name != "irules.yaml")
+    )
+    bad = 0
+    for path in paths:
+        dangling = _lint(path, settings)
+        if dangling:
+            bad += 1
+            print(f"{path}: dangling terms {', '.join(dangling)}", file=sys.stderr)
+        else:
+            print(f"{path}: ok")
+    return 2 if bad else 0
+
+
+def cmd_import(args) -> int:
+    from dataclasses import replace
+
+    from .ingest import run_ingest
+    from .mapping import load_irules, load_mapping
+    from .neo4j_store import Neo4jStore
+
+    settings = _settings(args)
+    mapping_path = (
+        Path(args.mapping)
+        if args.mapping
+        else settings.ontology_dir / "mapping" / f"{args.source}.yaml"
+    )
+    dangling = _lint(mapping_path, settings)
+    if dangling:
+        print(
+            f"mapping references terms the ontology does not define: "
+            f"{', '.join(dangling)}",
+            file=sys.stderr,
+        )
+        return 2
+    mapping = load_mapping(mapping_path)
+    irules = load_irules(settings.ontology_dir / "mapping" / "irules.yaml")
+    if args.base_iri:
+        irules = replace(irules, base=args.base_iri)
+    store = Neo4jStore(settings)
+    try:
+        report = run_ingest(
+            store, _load_adapter(args.adapter), mapping, irules,
+            actor=args.actor, max_batch=settings.max_batch,
+        )
+    finally:
+        store.close()
+    print(
+        f"import {report.job_id}: {report.succeeded} written, "
+        f"{report.failed} skipped of {report.total}"
+    )
+    return 0
+
 
 # --- chain C: export -> infer -> validate -> replace --------------------------
 # Any failure writes nothing. The previous derived layer is always better than a

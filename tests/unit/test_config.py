@@ -61,3 +61,14 @@ def test_malformed_uri_is_rejected():
 def test_bolt_scheme_is_accepted():
     s = Settings.from_env({"FEOMCP_NEO4J_URI": "bolt://db:7687", "FEOMCP_NEO4J_PASSWORD": "pw"})
     assert s.neo4j_uri == "bolt://db:7687"
+
+
+# --- Task 6: base IRI for generated entity identifiers -----------------------
+
+def test_base_iri_default():
+    assert Settings.from_env({}).base_iri == "https://example.org/id"
+
+
+def test_base_iri_override():
+    s = Settings.from_env({"FEOMCP_BASE_IRI": "https://data.example.com/onto"})
+    assert s.base_iri == "https://data.example.com/onto"
