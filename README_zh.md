@@ -219,6 +219,8 @@ SHACL-AF / SPARQL 约束**永不进写时路径**——太慢，且写时只回�
 
 ### 链路 D —— 批量导入（`onto import`）
 
+![链路 D —— 批量导入](misc/diagrams/chain-d.gif)
+
 真实企业的数据在 ERP / MES / WMS 系统里，不在 Turtle 里。`onto import` 让一整批数据
 走与 Agent 工具**相同的表示写入器和写时 SHACL**，因此导入的事实与工具写出的事实无法漂移。
 

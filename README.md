@@ -222,6 +222,8 @@ Between a write and the next `onto infer`, `:INFERRED` is stale. Three places ha
 
 ### Chain D — batch ingest (`onto import`)
 
+![Chain D — batch ingest](misc/diagrams/chain-d.gif)
+
 Real enterprise data lives in ERP / MES / WMS systems, not in Turtle. `onto import`
 runs one batch through the same representation writer and write-time SHACL check as
 the agent tools, so imported facts and tool-written facts are indistinguishable.
