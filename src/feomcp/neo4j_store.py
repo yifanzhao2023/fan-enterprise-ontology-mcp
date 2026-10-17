@@ -13,7 +13,7 @@ from rdflib import Graph, Literal as RdfLiteral, Namespace, RDF
 from .config import Settings
 from .errors import BackendUnavailable, FeomcpError, QueryLimitExceeded, QuerySyntaxError, WriteRejected
 from .guard import check_cypher
-from .ports import Entity, Relation, WriteBatch, WriteReceipt
+from .ports import Entity, Relation, WriteBatch, WriteReceipt, IngestJobMeta
 from .validate import require_valid
 
 # Identifiers that may be interpolated into Cypher. Everything else is refused.
@@ -97,6 +97,38 @@ class Neo4jStore:
     # ---- FactStore ----
 
     def upsert(self, batch: WriteBatch, *, actor: str = "system") -> WriteReceipt:
+        return self._upsert(batch, actor=actor)
+
+    def ingest(self, batch: WriteBatch, *, job: IngestJobMeta) -> WriteReceipt:
+        """Import one batch and its provenance in the same transaction.
+
+        A successful import can never leave ABox data without an :IngestJob(ok)
+        row. Any failure is audited on the way out and the ABox transaction rolls
+        back untouched.
+        """
+        try:
+            return self._upsert(batch, actor=f"ingest:{job.job_id}", job_meta=job)
+        except Exception as exc:
+            self.record_ingest_failure(job, error=str(exc)[:300])
+            raise
+
+    def record_ingest_failure(self, job: IngestJobMeta, *, error: str) -> None:
+        """The failed attempt is history, so it gets its own row."""
+        try:
+            with self._write.session() as session:
+                session.execute_write(
+                    lambda tx: _write_ingest_job(tx, job, status="failed", error=error)
+                )
+        except Exception as exc:  # noqa: BLE001 - auditing must not mask the cause
+            raise _map_driver_error(exc)
+
+    def _upsert(
+        self,
+        batch: WriteBatch,
+        *,
+        actor: str,
+        job_meta: IngestJobMeta | None = None,
+    ) -> WriteReceipt:
         if batch.size() > self._settings.max_batch:
             raise WriteRejected(
                 f"batch of {batch.size()} exceeds limit {self._settings.max_batch}",
@@ -126,6 +158,8 @@ class Neo4jStore:
                         "m.last_write_at = $now",
                         {"now": datetime.now(timezone.utc).isoformat(timespec="seconds")},
                     )
+                    if job_meta is not None:
+                        _write_ingest_job(tx, job_meta, status="ok")
 
                 session.execute_write(work)
         except FeomcpError:
@@ -581,6 +615,43 @@ def _write_job_row(
                 "allow_dirty": bool(fingerprint.get("allow_dirty", False)),
             },
         )
+
+
+def _write_ingest_job(
+    tx, job: "IngestJobMeta", *, status: str, error: str = ""
+) -> None:
+    """Create one append-only audit row per import attempt.
+
+    error_details is JSON text: Neo4j node properties cannot hold a list of
+    maps, and flattening it would lose the record_type grouping.
+    """
+    import json
+
+    tx.run(
+        "CREATE (j:IngestJob {job_id: $job_id, input_hash: $input_hash, "
+        "source_id: $source_id, source_version: $source_version, "
+        "snapshot_time: $snapshot_time, imported_at: $imported_at, "
+        "actor: $actor, status: $status, total: $total, "
+        "succeeded: $succeeded, failed: $failed, "
+        "error_details: $error_details, mapping_ref: $mapping_ref, "
+        "error: $error})",
+        {
+            "job_id": job.job_id,
+            "input_hash": job.input_hash,
+            "source_id": job.source_id,
+            "source_version": job.source_version,
+            "snapshot_time": job.snapshot_time,
+            "imported_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "actor": job.actor,
+            "status": status,
+            "total": job.total,
+            "succeeded": job.succeeded,
+            "failed": job.failed,
+            "error_details": json.dumps(list(job.error_details), ensure_ascii=False),
+            "mapping_ref": job.mapping_ref,
+            "error": error,
+        },
+    )
 
 
 def _fingerprint_params(fp: Mapping[str, Any]) -> dict[str, Any]:
