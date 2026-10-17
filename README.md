@@ -40,6 +40,7 @@ Agents read the ontology schema, query named competency questions or raw Cypher,
 - [11. Security Model](#11-security-model)
 - [12. Limitations](#12-limitations)
 - [13. Roadmap](#13-roadmap)
+- [Development & Testing](DEVELOPMENT.md)
 - [License](#license)
 
 ---
@@ -552,6 +553,10 @@ make demo
 
 Starts Neo4j, regenerates the projection, loads the sample ABox and runs every
 competency question against its expected result.
+
+For the repository layout, test layers, CI gates and the release/tag convention, see
+[DEVELOPMENT.md](DEVELOPMENT.md).
+
 ## 9. Configuration
 
 Environment variables. No config framework.

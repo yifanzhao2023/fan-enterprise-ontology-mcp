@@ -40,6 +40,7 @@ Agent 读取本体 Schema、查询命名能力问题或裸 Cypher、写入经过
 - [11. 安全模型](#11-安全模型)
 - [12. 限制](#12-限制)
 - [13. 路线图](#13-路线图)
+- [开发与测试](DEVELOPMENT.md)
 - [License](#license)
 
 ---
@@ -520,6 +521,9 @@ make demo
 ```
 
 起 Neo4j、重生成投影、载入样例 ABox、跑全部能力问题比对预期结果。
+
+仓库布局、测试分层、CI 门禁与发布/tag 约定见 [DEVELOPMENT.md](DEVELOPMENT.md)。
+
 ## 9. 配置
 
 环境变量。不引配置框架。
