@@ -8,12 +8,12 @@ Agent 读取本体 Schema、查询命名能力问题或裸 Cypher、写入经过
 
 **语言：** [English](README.md) · [简体中文](README_zh.md)
 
-> **状态：草稿。** v1 范围含本体存储与查询、Agent 集成层、离线推理、SHACL 校验。本体对齐与知识抽取已列入规划，尚未实现。
+> **状态：v1 已完成。** 本体存储与查询、Agent 集成层、离线推理、SHACL 校验均已实现并通过测试。本体对齐与知识抽取仍列入规划，尚未实现。
 
 - **协议：** MCP（stdio）
-- **语言：** Python（FastMCP）+ JVM 推理 CLI
+- **语言：** Python（MCP SDK）+ JVM 推理 CLI
 - **存储：** Neo4j
-- **交换格式：** Turtle / JSON-LD（RDF）；工具返回使用 JSON-LD 对齐的 `@context`
+- **交换格式：** Turtle（RDF）；工具返回使用 JSON-LD 对齐的 `@context` 作为业务契约层，不作为 RDF 交换格式
 - **推理：** Jena rules（OWL 2 RL + 业务规则），离线执行
 - **校验：** pySHACL（写时 SHACL Core，离线全量 SHACL）
 - **许可证：** [Apache License 2.0](LICENSE)
@@ -214,9 +214,9 @@ SHACL-AF / SPARQL 约束**永不进写时路径**——太慢，且写时只回�
 - `replace_derived` 顺手写**单例元数据节点**（`job_id`、`finished_at`、输入计数、派生计数、违规计数），Agent 可查派生层有多新。一个节点——不是第四类语义节点。
 - 触发频率是运维决策。文档给建议值（每小时，或写入后 N 分钟 debounce），不写死进代码。
 
-### 已知风险（进 spike，不阻塞）
+### 已知风险
 
-`materialize_rdf` 在大实例集导出时的内存占用。若 spike 显示撑不住，导出是把整张图读进一个 rdflib 模型；退路是按标签分区导出多个文件喂 JVM。契约目前假定单文件 `abox.ttl`。
+`materialize_rdf` 在大实例集导出时的内存占用。导出是把整张图读进一个 rdflib 模型；真实实例集一旦显示吃紧，退路是按标签分区导出多个文件喂 JVM。契约目前假定单文件 `abox.ttl`。
 
 ---
 
@@ -282,7 +282,7 @@ Jena rules 产出派生类型与派生关系，物化进 Neo4j 并打显式标�
 
 **`get_constraints` 只返回 Core 子集**（`minCount` / `maxCount` / `datatype` / `class`），供写入前预判。返回里带 `scope: "core"`。**通过写时校验只保证 Core 合规**——SHACL-AF / SPARQL 约束的违规要到下次离线全量校验才暴露，不在写入时。
 
-**`list_violations` 默认返回最近一次 `onto infer` 作业的违规**，与元数据节点的 `job_id` 对齐。v1 图里只留最近一批（整体重建），所以该过滤当前等价于「全部」；可选 `job_id` 参数是给审计和作业对比用的。
+**`list_violations` 默认返回最近一次*成功*作业的违规**（元数据节点的 `last_ok_job_id`），而不是最近一次尝试——失败的尝试没写违规，图里的行来自上次成功作业。v1 派生层是整体重建，图上只有最近一批；跨作业对比需要历史保留，v1 没做。
 
 ---
 
@@ -471,14 +471,17 @@ make demo
 ## 10. Quick Start
 
 ```bash
-# 1. 起 Neo4j
-docker compose up -d --wait
-
-# 2. 生成 schema 投影 + 载入样例 ABox
-make seed
-
-# 3. 跑全部能力问题比对预期结果
+# 一键：重置卷、起 Neo4j、生成投影、灌样例 ABox、跑离线推理、执行全部 CQ
 make demo
+```
+
+这一步端到端走完全程。想分步手动驱动：
+
+```bash
+docker compose up -d --wait   # 起 Neo4j
+make seed                     # 投影 + 灌样例 ABox
+make infer                    # 构建派生层
+make e2e                      # 全部 CQ 比对 sample_result
 ```
 
 然后按[安装](#8-安装)把 agent 接上，问一个业务问题。推荐第一个：
@@ -568,7 +571,7 @@ pip install -e ".[dev]"
 make rules-runner     # 构建 jvm/target/rules-runner.jar（要 JDK 17+ 和 Maven）
 make unit             # 无外部依赖
 make integration      # testcontainers，需要 Docker
-make demo             # up + seed + infer + e2e，跑在 docker-compose 上
+make demo             # down -v + up + seed + infer + e2e，跑在 docker-compose 上
 ```
 
 `make integration` 和 `make demo` 要 Docker，`make unit` 不要——快速循环靠它。
@@ -609,13 +612,7 @@ make demo             # up + seed + infer + e2e，跑在 docker-compose 上
 | `make demo` 全链路                         | 集成断裂             |
 
 
-**TBox profile 检查**：建模契约必须有机器检查。首选在 JVM 侧用权威的 `OWL2RLProfile` 检查（JVM 已在，成本是加一个依赖），超 profile 即拒跑 `onto infer`。
-
-退路：Python 侧构造器黑名单 lint（禁 `owl:unionOf` / `owl:complementOf` / `owl:oneOf` / `owl:hasValue` 等）——几十行，但**不完整**。
-
-```
-# ponytail: 优先 JVM 侧 OWL2RLProfile；黑名单 lint 仅作无 JVM 环境兜底
-```
+**TBox profile 检查**：`feomcp.validate.banned_owl_constructs` 在 JVM 启动前跑，拒绝建模契约禁止的五个构造器（`owl:unionOf` / `owl:complementOf` / `owl:oneOf` / `owl:hasValue` / `owl:disjointWith`）。它是黑名单 lint，代码里注明「不完整」。spec 原来首选的是 OWL API 的 `OWL2RLProfile` 权威检查，但 Jena 没有这个类，所以黑名单就是实际实现。
 
 ### 必测错误路径
 
@@ -627,17 +624,18 @@ make demo             # up + seed + infer + e2e，跑在 docker-compose 上
 - 投影缺失或不合法 → 拒启动
 - git 工作树脏 → `onto infer` 拒跑
 
-### Spike 验收标准
+### 已验证行为
 
-spike 产出是**结论与参数**，不是代码。结论写进设计文档的「已验证」小节。
+设计时悬而未决的 spike 都已了结，每一条现在都有测试钉住。
 
 
-| spike           | 验收标准                                  |
-| --------------- | ------------------------------------- |
+| 行为       | 结论                                  |
+| ---------- | ------------------------------------- |
 | ABox round-trip | `materialize_rdf` 把写进去的每个实体、类型、属性、关系原样吐出，零 diff |
-| URI 唯一键         | 以 `uri` 属性为实体唯一键；重复写入幂等；无重复实体      |
-| 版本兼容            | Neo4j 5.x 上读写会话与派生层重建稳定            |
-| 大实例集导出          | 10 万实例导出不 OOM；记录耗时与峰值内存；超阈值走分页 / 分区退路 |
+| URI 唯一键      | 以 `uri` 属性为实体唯一键；重复写入幂等；无重复实体      |
+| 版本兼容         | Neo4j 5.x 上读写会话与派生层重建稳定            |
+
+唯一未结的风险是大实例集导出的内存占用（见[已知风险](#4-工作原理)）；样例只有 18 个实体，生产规模未验证。
 
 
 ### 量化指标（POC 门槛，写死）
