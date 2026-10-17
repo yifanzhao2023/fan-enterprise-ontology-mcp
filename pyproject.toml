@@ -13,6 +13,7 @@ dependencies = [
   "neo4j>=5.26.0",
   "rdflib>=7.1.0",
   "pyshacl>=0.26.0",
+  "PyYAML>=6.0",
 ]
 
 [project.optional-dependencies]
