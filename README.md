@@ -8,12 +8,12 @@ Agents read the ontology schema, query named competency questions or raw Cypher,
 
 **Language:** [English](README.md) · [简体中文](README_zh.md)
 
-> **Status: draft.** Storage and query layer, agent integration, offline inference, SHACL validation are in scope for v1. Ontology alignment and knowledge extraction are planned, not built.
+> **Status:** v1 complete — storage, query, agent integration, offline inference and SHACL validation are all built and tested. Ontology alignment and knowledge extraction are planned, not built.
 
 - **Protocol:** MCP (stdio)
-- **Language:** Python (FastMCP) + JVM inference CLI
+- **Language:** Python (MCP SDK) + JVM inference CLI
 - **Storage:** Neo4j
-- **Interchange:** Turtle / JSON-LD (RDF); tool results use a JSON-LD-aligned `@context`
+- **Interchange:** Turtle (RDF); tool results use a JSON-LD-aligned `@context` as a business contract layer, never as an RDF exchange format
 - **Inference:** Jena rules (OWL 2 RL + business rules), offline
 - **Validation:** pySHACL (SHACL Core at write time, full SHACL offline)
 - **License:** [Apache License 2.0](LICENSE)
@@ -217,9 +217,9 @@ Between a write and the next `onto infer`, `:INFERRED` is stale. Three places ha
 - `replace_derived` writes a **singleton metadata node** (`job_id`, `finished_at`, input counts, derived count, violation count) so agents can ask how fresh the derived layer is. One node — not a fourth semantic class.
 - Trigger cadence is an ops decision. Docs suggest a default (hourly, or debounced N minutes after writes); nothing is hard-coded.
 
-### Known risk (spiked, not blocking)
+### Known risk
 
-`materialize_rdf` memory on large instance exports. If the spike shows it does not hold, the exporter loads the whole graph into one rdflib model; the fallback is a per-label partitioned export feeding the JVM multiple files. The contract assumes a single `abox.ttl` for now.
+`materialize_rdf` memory on large instance exports. The exporter loads the whole graph into one rdflib model; if a real instance set shows pressure, the fallback is a per-label partitioned export feeding the JVM multiple files. The contract assumes a single `abox.ttl` for now.
 
 ---
 
@@ -285,7 +285,7 @@ Ten tools, five groups.
 
 **`get_constraints` returns the Core subset only** (`minCount` / `maxCount` / `datatype` / `class`), for pre-write judgment. Responses carry `scope: "core"`. **Passing write-time validation guarantees only Core conformance** — SHACL-AF / SPARQL constraint violations surface at the next offline full validation, not at write time.
 
-**`list_violations` defaults to the latest `onto infer` job**, aligned with `job_id` on the metadata node. In v1 the graph holds only the most recent batch (rebuilt wholesale), so the filter is currently equivalent to "all"; the optional `job_id` parameter exists for audit and run comparison.
+**`list_violations` defaults to the latest *successful* job** (`last_ok_job_id` on the metadata node), not the latest attempt — a failed attempt wrote no violations, so the rows on the graph are from the last success. In v1 the derived layer is rebuilt wholesale, so only the latest job's rows exist; cross-job comparison needs history retention, which is not in v1.
 
 ---
 
@@ -492,14 +492,18 @@ Defaults assume the `docker compose` stack. Production must set the account vari
 ## 10. Quick Start
 
 ```bash
-# 1. bring up Neo4j
-docker compose up -d --wait
-
-# 2. generate the schema projection and load the sample ABox
-make seed
-
-# 3. run every competency question against its expected result
+# one shot: reset the volume, start Neo4j, build the projection, seed the
+# sample ABox, run the offline inference chain, and execute every CQ
 make demo
+```
+
+That runs the whole path end to end. To drive it step by step instead:
+
+```bash
+docker compose up -d --wait   # start Neo4j
+make seed                     # projection + load the sample ABox
+make infer                    # build the derived layer
+make e2e                      # run every CQ against its sample_result
 ```
 
 Then point an agent at the server (see [Installation](#8-installation)) and ask a
@@ -592,7 +596,7 @@ pip install -e ".[dev]"
 make rules-runner     # build jvm/target/rules-runner.jar (needs JDK 17+ and Maven)
 make unit             # no dependencies
 make integration      # testcontainers, needs a running Docker daemon
-make demo             # up + seed + infer + e2e against docker-compose
+make demo             # down -v + up + seed + infer + e2e against docker-compose
 ```
 
 `make integration` and `make demo` need Docker. `make unit` does not — it is the
@@ -634,13 +638,7 @@ Only two Python ports earn their interface — storage and query — because bot
 | `make demo` full chain                     | Integration breaks                               |
 
 
-**TBox profile check**: the modeling contract needs a machine check. Preferred implementation is an authoritative `OWL2RLProfile` check on the JVM side (the JVM is already there; the cost is one dependency), failing `onto infer` on violation.
-
-Fallback: a Python-side constructor blacklist lint (disallow `owl:unionOf` / `owl:complementOf` / `owl:oneOf` / `owl:hasValue`, …) — a few dozen lines, **incomplete**.
-
-```
-# ponytail: prefer JVM-side OWL2RLProfile; blacklist lint is the no-JVM fallback only
-```
+**TBox profile check**: `feomcp.validate.banned_owl_constructs` runs before the JVM is launched and rejects the five constructors the modeling contract forbids (`owl:unionOf` / `owl:complementOf` / `owl:oneOf` / `owl:hasValue` / `owl:disjointWith`). It is a blacklist lint and is named as incomplete in the code. The spec's preferred authoritative check was an OWL API `OWL2RLProfile`; Jena has no such class, so the blacklist is the implementation.
 
 ### Error paths that must be tested
 
@@ -652,17 +650,18 @@ Fallback: a Python-side constructor blacklist lint (disallow `owl:unionOf` / `ow
 - Projection missing or invalid → refuse to start
 - Dirty git tree → `onto infer` refuses
 
-### Spike acceptance criteria
+### Verified behaviours
 
-Spikes produce **conclusions and parameters**, not code. Conclusions are written into the design doc's verified section.
+The spikes that were open at design time are resolved; each is now pinned by a test.
 
 
-| Spike                 | Acceptance                                                                                                                 |
+| Behaviour             | What holds                                                                                                                  |
 | --------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | ABox round-trip       | `materialize_rdf` re-emits every entity, type, property and relation that was written (zero diff)                            |
-| URI unique key        | the `uri` property as entity unique key; repeated writes are idempotent; no duplicate entities                             |
-| Version compatibility | Neo4j 5.x stable for the read/write sessions and the derived-layer rebuild                                                 |
-| Large instance export | 100k instances export without OOM; record duration and peak memory; fall back to paged / partitioned export past threshold |
+| URI unique key        | the `uri` property is the entity unique key; repeated writes are idempotent; no duplicate entities                          |
+| Version compatibility | Neo4j 5.x stable for the read/write sessions and the derived-layer rebuild                                                  |
+
+The one open risk is large-instance export memory (see [Known risk](#4-how-it-works)); the sample is 18 entities, so it is untested at production scale.
 
 
 ### Metrics (POC thresholds, fixed)

@@ -45,7 +45,7 @@ owl:unionOf   owl:complementOf   owl:oneOf   owl:hasValue   owl:disjointWith
 ```
 
 **（2）算术条件不进 TBox。** 「金额 > 100 万」这类比较写不进 OWL——描述逻辑没有比较运算。
-它属于 Jena Rules（Plan 2），不要试图用公理表达。
+它属于 Jena Rules（`rules/*.rules`），不要试图用公理表达。
 
 最小形状：
 
@@ -533,7 +533,7 @@ contract001  end_date=2027-03-31  status=active
 contract004  end_date=2025-01-01  status=expired
 ```
 
-**这是查询，不是派生标签。** 理由是可复现性：`onto-infer` 是纯函数，重放同样的输入必须得到同样的输出；
+**这是查询，不是派生标签。** 理由是可复现性：`onto infer` 是纯函数，重放同样的输入必须得到同样的输出；
 读墙钟的规则做不到。真要 `:Expired` 标签，把 `as_of` 作为记录进作业指纹的输入传下去即可。
 
 ### 13.5 派生事实有多新
@@ -542,7 +542,7 @@ contract004  end_date=2025-01-01  status=expired
 get_inference_status()
 ```
 
-`stale` 在任何写入之后就是 `true`，直到下一次 `onto-infer`。**陈旧是常态，不是故障。**
+`stale` 在任何写入之后就是 `true`，直到下一次 `onto infer`。**陈旧是常态，不是故障。**
 不要在 `stale: true` 的时候用派生事实答题而不说明。
 
 ---
